@@ -1,0 +1,160 @@
+# Стандартные игнорируемые файлы
+.DS_Store
+.idea/
+.vscode/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE specific files
+*.swp
+*.swo
+*~
+
+# Project specific (добавьте сюда только то, что точно нужно игнорировать)
+# data/pi_digits/  # Раскомментируйте, если храните цифры π в репозитории
+
+# Временные файлы тестов
+*.tmp
+*.temp
+
+# Файлы, специфичные для ОС
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Файлы кэша
+.cache/
+.mypy_cache/
+
+# Файлы логов
+*.log
+
+# Файлы сборки и установки
+build/
+dist/
+*.egg-info/
+
+# Файлы виртуального окружения
+venv/
+ENV/
+
+# Файлы PyCharm
+.idea/
+.idea_modules/
+
+# Файлы VS Code
+.vscode/
+
+# Файлы macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Файлы Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Файлы Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Файлы Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Файлы кэша pip
+.pip-cache/
+
+# Файлы mypy
+.mypy_cache/
+
+# Файлы pytest
+.pytest_cache/
+
+# Файлы coverage
+.coverage
+htmlcov/
+
+# Файлы Jupyter Notebook
+.ipynb_checkpoints
+
+# Файлы окружения
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Файлы для разработки
+*.swp
+*.swo
+*~
+
+# Файлы проекта (раскомментируйте по необходимости)
+# data/raw/
+# data/processed/
+# data/external/
+# data/interim/
+# data/processed/
+# data/pi_digits/

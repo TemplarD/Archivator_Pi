@@ -1,0 +1,81 @@
+"""
+Index Manager для Pi-Archiver Ultra
+Управление созданием и сохранением индексных файлов
+"""
+
+import json
+import time
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, asdict
+
+@dataclass
+class ArchiveIndex:
+    """Индекс архива с метаданными"""
+    files: List[Dict[str, Any]]
+    pi_precision: int
+    created_at: float
+    total_blocks: int
+    compression_ratio: float
+
+class IndexManager:
+    """Менеджер индексных файлов архива"""
+    
+    def __init__(self, index_dir: str = "data/indexes"):
+        self.index_dir = Path(index_dir)
+        self.index_dir.mkdir(parents=True, exist_ok=True)
+    
+    def create_index(self, file_infos: List[Dict[str, Any]], pi_precision: int) -> ArchiveIndex:
+        """Создает индекс архива"""
+        total_blocks = sum(len(info.get('blocks', [])) for info in file_infos)
+        
+        # Рассчитываем общую степень сжатия
+        original_size = sum(info.get('original_size', 0) for info in file_infos)
+        compressed_size = sum(info.get('compressed_size', 0) for info in file_infos)
+        compression_ratio = compressed_size / original_size if original_size > 0 else 0
+        
+        return ArchiveIndex(
+            files=file_infos,
+            pi_precision=pi_precision,
+            created_at=time.time(),
+            total_blocks=total_blocks,
+            compression_ratio=compression_ratio
+        )
+    
+    def save_index(self, index: ArchiveIndex, filename: str) -> Path:
+        """Сохраняет индекс в файл"""
+        index_path = self.index_dir / f"{filename}.idx"
+        
+        # Конвертируем dataclass в dict для JSON сериализации
+        index_dict = asdict(index)
+        
+        with open(index_path, 'w', encoding='utf-8') as f:
+            json.dump(index_dict, f, indent=2, ensure_ascii=False)
+        
+        return index_path
+    
+    def load_index(self, filename: str) -> Optional[ArchiveIndex]:
+        """Загружает индекс из файла"""
+        index_path = self.index_dir / f"{filename}.idx"
+        
+        if not index_path.exists():
+            return None
+        
+        with open(index_path, 'r', encoding='utf-8') as f:
+            index_dict = json.load(f)
+        
+        # Восстанавливаем dataclass из dict
+        return ArchiveIndex(**index_dict)
+    
+    def list_indexes(self) -> List[str]:
+        """Возвращает список доступных индексов"""
+        return [f.stem for f in self.index_dir.glob("*.idx")]
+    
+    def delete_index(self, filename: str) -> bool:
+        """Удаляет индексный файл"""
+        index_path = self.index_dir / f"{filename}.idx"
+        
+        if index_path.exists():
+            index_path.unlink()
+            return True
+        return False
