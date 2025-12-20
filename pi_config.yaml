@@ -1,0 +1,17 @@
+# Pi-Archiver Ultra Configuration
+# Конфигурация для хранения и использования цифр π
+
+# Путь к файлу с цифрами π по умолчанию
+pi_file_path: "pi_storage/pi_1000000_digits.txt"
+
+# Количество цифр π по умолчанию
+default_precision: 1000000
+
+# Использовать существующий файл если доступен
+use_existing_file: true
+
+# Путь для пользовательских файлов π
+custom_pi_directory: "custom_pi"
+
+# Автоматически генерировать если файл не найден
+auto_generate: true

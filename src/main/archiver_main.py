@@ -7,11 +7,13 @@
 import os
 import sys
 import time
+import hashlib
 import argparse
 import logging
 from pathlib import Path
-from typing import List, Optional
-import multiprocessing as mp
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+import yaml
 
 # Добавляем пути к модулям
 sys.path.append(str(Path(__file__).parent.parent))
@@ -75,18 +77,69 @@ except ImportError:
 class PiArchiverUltra:
     """Основной класс архиватора Pi-Archiver Ultra"""
     
-    def __init__(self, cache_dir: str = "data/pi_storage", 
-                 index_dir: str = "data/indexes",
-                 pi_precision: int = 1000000):
+    def __init__(self, cache_dir: str = None, 
+                 index_dir: str = None,
+                 pi_precision: int = 1000000,
+                 config_file: str = None):
+        # Загружаем конфигурацию
+        self.config = self._load_config(config_file)
+        
+        # Используем текущую директорию для работы
+        current_dir = Path.cwd()
+        if cache_dir is None:
+            pi_file_path = Path(self.config.get('pi_file_path', 'pi_storage'))
+            cache_dir = current_dir / pi_file_path.parent
+        if index_dir is None:
+            index_dir = current_dir  # Текущая директория, а не подпапка!
+            
+        # Создаем директории если не существуют
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+        # index_dir - это текущая директория, ее создавать не нужно
+        
+        print(f"Кэш π: {cache_dir}")
+        print(f"Индексы: {index_dir}")
+        print(f"Ищем файл π: {cache_dir / 'pi_1000000_digits.txt'}")
+        
         self.pi_generator = PiGenerator(cache_dir)
         self.search_engine = PiSearchEngine(self.pi_generator)
         self.compression_core = CompressionCore(self.pi_generator)
         self.index_manager = IndexManager(index_dir)
-        self.pi_precision = pi_precision
+        self.pi_precision = pi_precision or self.config.get('default_precision', 1000000)
         
         # Настройка логирования
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
+    
+    def _load_config(self, config_file: str = None) -> dict:
+        """Загружает конфигурацию из YAML файла"""
+        if config_file is None:
+            # Ищем конфигурационный файл в текущей директории и директории проекта
+            current_dir = Path.cwd()
+            project_dir = Path(__file__).parent.parent.parent
+            
+            config_paths = [
+                current_dir / "pi_config.yaml",
+                project_dir / "pi_config.yaml",
+                current_dir / ".pi_config.yaml",
+                project_dir / ".pi_config.yaml"
+            ]
+            
+            for config_path in config_paths:
+                if config_path.exists():
+                    try:
+                        with open(config_path, 'r', encoding='utf-8') as f:
+                            return yaml.safe_load(f) or {}
+                    except Exception as e:
+                        print(f"Ошибка загрузки конфигурации из {config_path}: {e}")
+        
+        # Конфигурация по умолчанию
+        return {
+            'pi_file_path': 'pi_storage/pi_1000000_digits.txt',
+            'default_precision': 1000000,
+            'use_existing_file': True,
+            'custom_pi_directory': 'custom_pi',
+            'auto_generate': True
+        }
         
         # Создаем handler для файла с проверкой прав
         try:
@@ -146,7 +199,8 @@ class PiArchiverUltra:
             output_path = Path(output_dir) / output_name
             output_path.parent.mkdir(parents=True, exist_ok=True)
         else:
-            output_path = Path(output_name)
+            # Сохраняем в текущую директорию по умолчанию
+            output_path = Path.cwd() / output_name
         
         self.logger.info(f"Начало архивации: {input_path}")
         self.logger.info(f"Размер файла: {input_path.stat().st_size:,} байт")
@@ -337,6 +391,14 @@ class PiArchiverUltra:
             index.get("pi_precision", self.pi_precision)
         )
         
+        # Подсчитываем общее количество блоков для прогресс-бара
+        total_blocks = sum(len(file_info.get("blocks", [])) for file_info in index.get("files", []))
+        processed_blocks = 0
+        processed_files = 0
+        total_files = len(index.get("files", []))
+        
+        print(f"Восстановление данных ({total_files} файлов, {total_blocks} блоков)...")
+        
         extracted_files = []
         
         for file_info in index.get("files", []):
@@ -349,7 +411,11 @@ class PiArchiverUltra:
                 continue
             
             file_path = output_path / Path(filename).name
-            print(f"Извлечение: {file_path}")
+            print(f"\nИзвлечение: {file_path}")
+            
+            # Счетчик блоков для текущего файла
+            file_blocks_processed = 0
+            file_blocks_total = len(blocks)
             
             try:
                 # Загружаем сохраненные блоки данных
@@ -385,6 +451,28 @@ class PiArchiverUltra:
                             compressed_size=block_data.get("compressed_size", 0),
                             data_hash=block_data.get("data_hash", "")
                         ))
+                    
+                    # Обновляем прогресс-бар (общий и по файлу) - выводим только каждый 10-й блок для уменьшения дублирования
+                    processed_blocks += 1
+                    file_blocks_processed += 1
+                    
+                    # Выводим прогресс только в конце файла - как работает
+                    if file_blocks_processed == file_blocks_total:
+                        # Общий прогресс - правильный расчет без отрицательных чисел
+                        current_file_progress = file_blocks_processed / file_blocks_total if file_blocks_total > 0 else 0
+                        completed_files = processed_files - 1 if processed_files > 0 else 0
+                        total_progress = ((completed_files + current_file_progress) / total_files) * 100 if total_files > 0 else 0
+                        
+                        # Прогресс по текущему файлу
+                        file_progress = current_file_progress * 100
+                        
+                        # Объединенный прогресс-бар как в архивации
+                        bar_length = 50
+                        total_filled_length = int(bar_length * (completed_files + current_file_progress) / total_files) if total_files > 0 else 0
+                        total_bar = '█' * total_filled_length + '-' * (bar_length - total_filled_length)
+                        
+                        # Выводим прогресс с коротким текстом как в архивации
+                        print(f"\rОбщий: |{total_bar}| {total_progress:.1f}% ({processed_files}/{total_files})  Файл: {file_progress:.1f}% ({file_blocks_processed}/{file_blocks_total})", end="")
                 
                 decompressed_data = self.compression_core.decompress_data(
                     compression_blocks, pi_digits, original_size, xor_key
@@ -394,13 +482,16 @@ class PiArchiverUltra:
                     f.write(decompressed_data)
                 
                 extracted_files.append(str(file_path))
-                print(f"Успешно извлечен: {file_path}")
+                processed_files += 1
+                print()  # Перенос строки после завершения файла как в архивации
+                print()  # Перенос строки после завершения файла
                 
             except Exception as e:
-                print(f"Ошибка извлечения {filename}: {e}")
+                print(f"\nОшибка извлечения {filename}: {e}")
                 continue
         
         print(f"Извлечение завершено. Файлов: {len(extracted_files)}")
+        print()  # Новая строка после прогресс-бара
         return extracted_files
     
     def _save_compressed_blocks(self, blocks: List, archive_name: str):
@@ -448,8 +539,6 @@ class PiArchiverUltra:
                     original_data = b''
                     if start_pos == 0 and end_pos == 0 and data_size > 0:
                         original_data = f.read(data_size)
-                        print(f"Загружен блок {block_id}: {len(original_data)} байт, хеш: {data_hash}")
-                    
                     blocks[block_id] = {
                         'original_data': original_data,
                         'start_pos': start_pos if start_pos != 0 else None,

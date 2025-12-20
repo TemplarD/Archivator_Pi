@@ -1,7 +1,4 @@
-# Стандартные игнорируемые файлы
-.DS_Store
-.idea/
-.vscode/
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -19,8 +16,6 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -44,12 +39,46 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *.cover
-*.py,cover
 .hypothesis/
 .pytest_cache/
 
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# celery beat schedule file
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
 
 # Environments
 .env
@@ -60,112 +89,41 @@ ENV/
 env.bak/
 venv.bak/
 
-# IDE specific files
-*.swp
-*.swo
-*~
+# Spyder project settings
+.spyderproject
+.spyproject
 
-# Project specific (добавьте сюда только то, что точно нужно игнорировать)
-# data/pi_digits/  # Раскомментируйте, если храните цифры π в репозитории
+# Rope project settings
+.ropeproject
 
-# Временные файлы тестов
-*.tmp
-*.temp
+# mkdocs documentation
+/site
 
-# Файлы, специфичные для ОС
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# Файлы кэша
-.cache/
+# mypy
 .mypy_cache/
+.dmypy.json
+dmypy.json
 
-# Файлы логов
-*.log
+# Pyre type checker
+.pyre/
 
-# Файлы сборки и установки
-build/
-dist/
-*.egg-info/
+# Pi-Archiver specific
+pi_storage/
+*.piarc
+*.piarc.idx
+test_files/
+temp/
 
-# Файлы виртуального окружения
-venv/
-ENV/
-
-# Файлы PyCharm
-.idea/
-.idea_modules/
-
-# Файлы VS Code
+# IDE
 .vscode/
-
-# Файлы macOS
-.DS_Store
-.AppleDouble
-.LSOverride
-
-# Файлы Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# Файлы Linux
-*~
-.fuse_hidden*
-.directory
-.Trash-*
-.nfs*
-
-# Файлы Python
-__pycache__/
-*.py[cod]
-*$py.class
-
-# Файлы кэша pip
-.pip-cache/
-
-# Файлы mypy
-.mypy_cache/
-
-# Файлы pytest
-.pytest_cache/
-
-# Файлы coverage
-.coverage
-htmlcov/
-
-# Файлы Jupyter Notebook
-.ipynb_checkpoints
-
-# Файлы окружения
-.env
-.venv
-env/
-venv/
-ENV/
-
-# Файлы для разработки
+.idea/
 *.swp
 *.swo
 *~
 
-# Файлы проекта (раскомментируйте по необходимости)
-# data/raw/
-# data/processed/
-# data/external/
-# data/interim/
-# data/processed/
-# data/pi_digits/
+# OS
+.DS_Store
+Thumbs.db
 
-# Тестовые файлы архивов и разархивированных данных
-archives/*
-extracted/*
-!archives/.gitkeep
-!extracted/.gitkeep
-
-# Индексные файлы архивов и блоки данных
-data/indexes/*.idx
-data/indexes/*.blocks
-!data/indexes/.gitkeep
+# Logs
+*.log

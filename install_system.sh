@@ -201,15 +201,21 @@ copy_project_files() {
     cp README.md $INSTALL_DIR/
     cp INSTALL.md $INSTALL_DIR/
     cp LICENSE $INSTALL_DIR/
+    cp pi_config.yaml $INSTALL_DIR/
     
     # Копируем requirements
     cp requirements.txt $INSTALL_DIR/
+    
+    # Копируем существующий файл π
+    mkdir -p $DATA_DIR/pi_storage
+    cp data/pi_storage/pi_1000000_digits.txt $DATA_DIR/pi_storage/
     
     # Установка прав
     chown -R root:root $INSTALL_DIR
     chmod -R 755 $INSTALL_DIR
     
     print_success "Файлы проекта скопированы"
+    print_success "Файл π скопирован в: $DATA_DIR/pi_storage/"
 }
 
 # Компиляция C++ компонентов
@@ -244,9 +250,6 @@ source /opt/pi-archiver/venv/bin/activate
 
 # Устанавливаем переменные окружения
 export PI_ARCHIVER_HOME="/opt/pi-archiver"
-export PI_CACHE_DIR="/var/lib/pi-archiver/pi_storage"
-export PI_INDEX_DIR="/var/lib/pi-archiver/indexes"
-export PI_LOG_DIR="/var/log/pi-archiver"
 export OMP_NUM_THREADS=$(nproc)
 
 # Запускаем основной модуль

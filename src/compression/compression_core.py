@@ -309,24 +309,20 @@ class CompressionCore:
                         try:
                             hex_data = pi_digits[start_hex:end_hex]
                             block_data = bytes.fromhex(hex_data)
-                            print(f"Блок {block.block_id}: извлечено {len(block_data)} байт из π")
                         except (ValueError, TypeError) as e:
                             print(f"Ошибка преобразования hex для блока {block.block_id}: {e}")
                             block_data = block.original_data
                     else:
-                        print(f"Позиция выходит за пределы для блока {block.block_id}")
+                        print(f"Ошибка: позиция выходит за пределы для блока {block.block_id}")
                         block_data = block.original_data
                 else:
-                    print(f"Нет позиций для блока {block.block_id}")
+                    print(f"Ошибка: нет позиций для блока {block.block_id}")
                     block_data = block.original_data
             else:
                 # Блок не найден в π, используем сохраненные XOR-декоррелированные данные
-                print(f"Блок {block.block_id}: используем сохраненные данные ({len(block.original_data)} байт)")
                 block_data = block.original_data
             
             recovered_data.extend(block_data)
-        
-        print(f"Всего собрано XOR-декоррелированных данных: {len(recovered_data)} байт")
         
         # Применяем обратный XOR ко всему массиву данных
         if len(recovered_data) > 0:
@@ -336,7 +332,6 @@ class CompressionCore:
         
         # Обрезаем до исходного размера
         result = final_data[:original_size]
-        print(f"Финальный размер после обрезки: {len(result)} байт")
         
         return result
     

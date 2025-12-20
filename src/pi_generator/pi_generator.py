@@ -13,7 +13,7 @@ from typing import Optional, Tuple
 import multiprocessing as mp
 
 class PiGenerator:
-    def __init__(self, cache_dir: str = "data/pi_storage"):
+    def __init__(self, cache_dir: str = "pi_storage"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
