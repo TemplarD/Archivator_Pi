@@ -2,209 +2,34 @@
   "files": [
     {
       "filename": "test_file.txt",
-      "original_size": 241,
-      "compressed_size": 240,
-      "blocks_count": 24,
-      "compression_ratio": 1.0041666666666667,
-      "pi_precision": 63,
+      "original_size": 22,
+      "compressed_size": 22,
+      "blocks_count": 2,
+      "compression_ratio": 1.0,
+      "xor_key": 119,
+      "pi_precision": 1000000,
       "blocks": [
         {
           "block_id": 0,
           "start_pos": null,
           "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "13497316",
-          "original_size": 10
+          "compressed_size": 16,
+          "data_hash": "fd3cccbe",
+          "original_size": 16
         },
         {
           "block_id": 1,
           "start_pos": null,
           "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "30e48e3a",
-          "original_size": 10
-        },
-        {
-          "block_id": 2,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "31e869da",
-          "original_size": 10
-        },
-        {
-          "block_id": 3,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "6fe77f29",
-          "original_size": 10
-        },
-        {
-          "block_id": 4,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "69e13c4e",
-          "original_size": 10
-        },
-        {
-          "block_id": 5,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "c941fc9d",
-          "original_size": 10
-        },
-        {
-          "block_id": 6,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "3d848ceb",
-          "original_size": 10
-        },
-        {
-          "block_id": 7,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "f3208298",
-          "original_size": 10
-        },
-        {
-          "block_id": 8,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "67920bbe",
-          "original_size": 10
-        },
-        {
-          "block_id": 9,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "915d38c2",
-          "original_size": 10
-        },
-        {
-          "block_id": 10,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "2e6dd6f2",
-          "original_size": 10
-        },
-        {
-          "block_id": 11,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "de35363e",
-          "original_size": 10
-        },
-        {
-          "block_id": 12,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "157bbcb4",
-          "original_size": 10
-        },
-        {
-          "block_id": 13,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "6fad9b12",
-          "original_size": 10
-        },
-        {
-          "block_id": 14,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "3d4ec59b",
-          "original_size": 10
-        },
-        {
-          "block_id": 15,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "531a6b7e",
-          "original_size": 10
-        },
-        {
-          "block_id": 16,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "9d606435",
-          "original_size": 10
-        },
-        {
-          "block_id": 17,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "d9b8939b",
-          "original_size": 10
-        },
-        {
-          "block_id": 18,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "6e15fc1e",
-          "original_size": 10
-        },
-        {
-          "block_id": 19,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "081965c6",
-          "original_size": 10
-        },
-        {
-          "block_id": 20,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "513b3ec4",
-          "original_size": 10
-        },
-        {
-          "block_id": 21,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "a0e1dd03",
-          "original_size": 10
-        },
-        {
-          "block_id": 22,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "71721206",
-          "original_size": 10
-        },
-        {
-          "block_id": 23,
-          "start_pos": null,
-          "end_pos": null,
-          "compressed_size": 10,
-          "data_hash": "06d651c3",
-          "original_size": 10
+          "compressed_size": 6,
+          "data_hash": "1170976a",
+          "original_size": 6
         }
       ]
     }
   ],
   "pi_precision": 1000000,
-  "created_at": 1766132519.2658076,
-  "total_blocks": 24,
-  "compression_ratio": 0.995850622406639
+  "created_at": 1766208350.9247344,
+  "total_blocks": 2,
+  "compression_ratio": 1.0
 }

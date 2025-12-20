@@ -58,6 +58,7 @@ def create_file_info_from_compression(
     file_path: str, 
     blocks: List[CompressionBlock], 
     stats: CompressionStats,
+    xor_key: int,
     pi_precision: int
 ) -> Dict[str, Any]:
     """Создает информацию о файле для индекса"""
@@ -67,6 +68,7 @@ def create_file_info_from_compression(
         "compressed_size": stats.compressed_size,
         "blocks_count": len(blocks),
         "compression_ratio": stats.compression_ratio,
+        "xor_key": xor_key,
         "pi_precision": pi_precision,
         "blocks": [
             {

@@ -317,7 +317,7 @@ class IndexManager:
 
 
 def create_file_info_from_compression(original_path: str, blocks: List, 
-                                    stats, xor_key: int) -> Dict[str, Any]:
+                                    stats, xor_key: int, pi_precision: int) -> Dict[str, Any]:
     """
     Создает информацию о файле из результатов сжатия
     
@@ -326,6 +326,7 @@ def create_file_info_from_compression(original_path: str, blocks: List,
         blocks: сжатые блоки
         stats: статистика сжатия
         xor_key: XOR ключ
+        pi_precision: точность π
         
     Returns:
         словарь с информацией о файле
@@ -357,7 +358,8 @@ def create_file_info_from_compression(original_path: str, blocks: List,
         'file_hash': file_hash,
         'blocks': blocks_dict,
         'xor_key': hex(xor_key),
-        'encoding_type': 'arithmetic'
+        'encoding_type': 'arithmetic',
+        'pi_precision': pi_precision
     }
 
 

@@ -50,33 +50,25 @@ except ImportError:
 # Остальные импорты с динамической загрузкой
 from pi_generator.pi_generator import PiGenerator
 from search_engine.pi_search import PiSearchEngine
-from compression.compression_core import CompressionCore
+from compression.compression_core import CompressionCore, CompressionBlock, CompressionStats
 
 # Динамический импорт compression_types с fallback
 try:
-    from compression.compression_types import CompressionBlock, CompressionStats, create_file_info_from_compression
+    from compression.compression_utils import create_file_info_from_compression
+    print("Используем compression_utils")
 except ImportError:
     # Используем утилиты для работы с существующим CompressionBlock
     try:
-        from compression.compression_utils import create_file_info_from_compression
-        from compression.compression_core import CompressionBlock, CompressionStats
-        print("Используем compression_utils для работы с CompressionBlock")
+        from compression.compression_types import create_file_info_from_compression
+        print("Используем compression_types")
     except ImportError:
         # Альтернативный подход с AltCompressionBlock
         try:
-            from compression.compression_types_alt import AltCompressionBlock as CompressionBlock, AltCompressionStats as CompressionStats, create_alt_file_info_from_compression as create_file_info_from_compression, convert_to_alt_block, convert_to_alt_stats
+            from compression.compression_types_alt import create_alt_file_info_from_compression as create_file_info_from_compression
             print("Используем альтернативные типы сжатия")
         except ImportError:
             # Заглушка если ничего не найдено
             print("Warning: compression_types не найден, используя fallback")
-            class CompressionBlock:
-                def __init__(self, *args, **kwargs):
-                    pass
-            
-            class CompressionStats:
-                def __init__(self, *args, **kwargs):
-                    self.compression_ratio = 1.0
-            
             def create_file_info_from_compression(*args, **kwargs):
                 return {"original_size": 0, "compressed_size": 0}
 
@@ -229,10 +221,13 @@ class PiArchiverUltra:
         print("Сжатие данных...")
         blocks, stats = self.compression_core.compress_data(file_data, pi_digits, progress_callback=compression_progress_callback)
         
+        # Получаем реальный XOR ключ из процесса сжатия
+        xor_data, real_xor_key = self.compression_core._xor_decorrelate(file_data, pi_digits)
+        print(f"Реальный XOR ключ: 0x{real_xor_key:02X}")
+        
         # 4. Создаем информацию о файле
-        xor_key = 0x3F  # Фиксированный ключ для демонстрации
         file_info = create_file_info_from_compression(
-            str(input_path), blocks, stats, xor_key
+            str(input_path), blocks, stats, real_xor_key, self.pi_precision
         )
         
         # 5. Создаем и сохраняем индекс с прогрессом
@@ -327,46 +322,85 @@ class PiArchiverUltra:
         Returns:
             список извлеченных файлов
         """
-        print(f"Начало извлечения архива: {archive_name}")
-        
-        # 1. Загружаем индекс
-        index = self.index_manager.load_index(archive_name)
-        
-        # 2. Генерируем π
-        print(f"Генерация {index.pi_precision:,} цифр π...")
-        pi_digits = self.pi_generator.generate_pi_digits(index.pi_precision)
-        
-        # 3. Создаем выходную директорию
+        print(f"Извлечение архива: {archive_name}...")
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
+        try:
+            index = self.index_manager.load_index_by_archive_name(archive_name)
+        except Exception as e:
+            print(f"Ошибка загрузки индекса: {e}")
+            return []
+
+        print("Генерация цифр π...")
+        pi_digits = self.pi_generator.generate_pi_digits(
+            index.get("pi_precision", self.pi_precision)
+        )
+        
         extracted_files = []
         
-        # 4. Извлекаем каждый файл
-        for file_info in index.files:
-            print(f"Извлечение файла: {file_info.original_name}")
+        for file_info in index.get("files", []):
+            filename = file_info.get("filename")
+            original_size = file_info.get("original_size")
+            blocks = file_info.get("blocks", [])
+            xor_key = file_info.get("xor_key", 0x3F)  # Используем ключ по умолчанию, если не сохранен
             
-            # Загружаем сжатые блоки
-            blocks = self._load_compressed_blocks(archive_name, file_info.original_name)
+            if not filename or original_size is None:
+                continue
             
-            if blocks:
-                # Восстанавливаем данные
-                xor_key = int(file_info.xor_key, 16)
-                recovered_data = self.compression_core.decompress_data(
-                    blocks, pi_digits, file_info.original_size, xor_key
+            file_path = output_path / Path(filename).name
+            print(f"Извлечение: {file_path}")
+            
+            try:
+                # Загружаем сохраненные блоки данных
+                saved_blocks = self._load_compressed_blocks(archive_name, filename)
+                
+                compression_blocks = []
+                for block_data in blocks:
+                    block_id = block_data.get("block_id", 0)
+                    
+                    # Получаем сохраненные данные для этого блока
+                    saved_block = saved_blocks.get(block_id, {})
+                    
+                    # Проверяем, есть ли сохраненные данные в файле .blocks
+                    if block_data.get("start_pos") is None:
+                        # Блок не найден в π, используем сохраненные данные
+                        compression_blocks.append(CompressionBlock(
+                            block_id=block_id,
+                            original_data=saved_block.get('original_data', b''),
+                            xor_key=xor_key,
+                            start_pos=None,
+                            end_pos=None,
+                            compressed_size=block_data.get("compressed_size", 0),
+                            data_hash=block_data.get("data_hash", "")
+                        ))
+                    else:
+                        # Блок найден в π
+                        compression_blocks.append(CompressionBlock(
+                            block_id=block_id,
+                            original_data=b'',
+                            xor_key=xor_key,
+                            start_pos=block_data.get("start_pos"),
+                            end_pos=block_data.get("end_pos"),
+                            compressed_size=block_data.get("compressed_size", 0),
+                            data_hash=block_data.get("data_hash", "")
+                        ))
+                
+                decompressed_data = self.compression_core.decompress_data(
+                    compression_blocks, pi_digits, original_size, xor_key
                 )
                 
-                # Сохраняем файл
-                output_file = output_path / file_info.original_name
-                with open(output_file, 'wb') as f:
-                    f.write(recovered_data)
+                with open(file_path, "wb") as f:
+                    f.write(decompressed_data)
                 
-                extracted_files.append(str(output_file))
-                print(f"Файл извлечен: {output_file}")
-            else:
-                print(f"Не удалось загрузить блоки для файла: {file_info.original_name}")
+                extracted_files.append(str(file_path))
+                print(f"Успешно извлечен: {file_path}")
+                
+            except Exception as e:
+                print(f"Ошибка извлечения {filename}: {e}")
+                continue
         
-        print(f"Извлечение завершено. Файлов извлечено: {len(extracted_files)}")
+        print(f"Извлечение завершено. Файлов: {len(extracted_files)}")
         return extracted_files
     
     def _save_compressed_blocks(self, blocks: List, archive_name: str):
@@ -386,16 +420,15 @@ class PiArchiverUltra:
                 if not block.found_positions():
                     f.write(block.original_data)
     
-    def _load_compressed_blocks(self, archive_name: str, file_name: str) -> List:
+    def _load_compressed_blocks(self, archive_name: str, file_name: str) -> dict:
         """Загружает сжатые блоки из файла"""
-        from compression.compression_core import CompressionBlock
-        
         blocks_file = Path(self.index_manager.index_dir) / f"{archive_name}.blocks"
         
         if not blocks_file.exists():
-            return []
+            print(f"Файл блоков не найден: {blocks_file}")
+            return {}
         
-        blocks = []
+        blocks = {}
         
         with open(blocks_file, 'rb') as f:
             while True:
@@ -413,23 +446,26 @@ class PiArchiverUltra:
                     
                     # Читаем данные если нужно
                     original_data = b''
-                    if start_pos == 0 and end_pos == 0:
+                    if start_pos == 0 and end_pos == 0 and data_size > 0:
                         original_data = f.read(data_size)
+                        print(f"Загружен блок {block_id}: {len(original_data)} байт, хеш: {data_hash}")
                     
-                    block = CompressionBlock(
-                        block_id=block_id,
-                        original_data=original_data,
-                        xor_key=0,
-                        start_pos=start_pos if start_pos != 0 else None,
-                        end_pos=end_pos if end_pos != 0 else None,
-                        compressed_size=data_size,
-                        data_hash=data_hash
-                    )
-                    blocks.append(block)
+                    blocks[block_id] = {
+                        'original_data': original_data,
+                        'start_pos': start_pos if start_pos != 0 else None,
+                        'end_pos': end_pos if end_pos != 0 else None,
+                        'compressed_size': data_size,
+                        'data_hash': data_hash
+                    }
                     
-                except struct.error:
+                except struct.error as e:
+                    print(f"Ошибка чтения структуры: {e}")
+                    break
+                except Exception as e:
+                    print(f"Ошибка загрузки блока: {e}")
                     break
         
+        print(f"Загружено {len(blocks)} блоков из файла")
         return blocks
     
     def get_archive_info(self, archive_name: str) -> dict:

@@ -278,69 +278,115 @@ class CompressionCore:
             xor_effectiveness=xor_effectiveness
         )
     
-    def decompress_data(self, blocks: List[CompressionBlock], pi_digits: str, 
+    def decompress_data(self, blocks: List[CompressionBlock], pi_digits: str,
                        original_size: int, xor_key: int) -> bytes:
         """
         Восстановление данных из сжатых блоков
         
         Args:
-            blocks: сжатые блоки
+            blocks: сжатые блоки (уже XOR-декоррелированные)
             pi_digits: цифры π
             original_size: исходный размер данных
-            xor_key: XOR ключ
+            xor_key: XOR ключ (используется для восстановления)
             
         Returns:
             восстановленные данные
         """
-        print(f"Начало восстановления данных ({original_size} байт)...")
+        print(f"Восстановление {original_size} байт...")
         
+        # Собираем все XOR-декоррелированные данные в правильном порядке
         recovered_data = bytearray()
-        
-        # Восстанавливаем блоки в правильном порядке
         sorted_blocks = sorted(blocks, key=lambda b: b.block_id)
         
         for block in sorted_blocks:
             if block.found_positions():
                 # Извлекаем данные из π
                 if block.start_pos is not None and block.end_pos is not None:
-                    # Преобразуем позиции в hex
-                    start_hex = block.start_pos * 2  # Умножаем на 2 для hex индекса
+                    start_hex = block.start_pos * 2
                     end_hex = block.end_pos * 2 + 2
                     
                     if end_hex <= len(pi_digits):
-                        hex_data = pi_digits[start_hex:end_hex]
-                        block_data = bytes.fromhex(hex_data)
+                        try:
+                            hex_data = pi_digits[start_hex:end_hex]
+                            block_data = bytes.fromhex(hex_data)
+                            print(f"Блок {block.block_id}: извлечено {len(block_data)} байт из π")
+                        except (ValueError, TypeError) as e:
+                            print(f"Ошибка преобразования hex для блока {block.block_id}: {e}")
+                            block_data = block.original_data
                     else:
-                        # Если позиция выходит за пределы, используем оригинальные данные
+                        print(f"Позиция выходит за пределы для блока {block.block_id}")
                         block_data = block.original_data
                 else:
+                    print(f"Нет позиций для блока {block.block_id}")
                     block_data = block.original_data
             else:
-                # Блок не найден в π, используем оригинальные данные
+                # Блок не найден в π, используем сохраненные XOR-декоррелированные данные
+                print(f"Блок {block.block_id}: используем сохраненные данные ({len(block.original_data)} байт)")
                 block_data = block.original_data
             
             recovered_data.extend(block_data)
         
-        # Применяем обратный XOR
-        final_data = self._reverse_xor_decorrelate(bytes(recovered_data), pi_digits, xor_key)
+        print(f"Всего собрано XOR-декоррелированных данных: {len(recovered_data)} байт")
+        
+        # Применяем обратный XOR ко всему массиву данных
+        if len(recovered_data) > 0:
+            final_data = self._reverse_xor_decorrelate(bytes(recovered_data), pi_digits, xor_key)
+        else:
+            final_data = bytes(recovered_data)
         
         # Обрезаем до исходного размера
-        return final_data[:original_size]
+        result = final_data[:original_size]
+        print(f"Финальный размер после обрезки: {len(result)} байт")
+        
+        return result
     
     def _reverse_xor_decorrelate(self, data: bytes, pi_digits: str, xor_key: int) -> bytes:
         """Обратная XOR-декорреляция"""
         reversed_data = bytearray()
         pi_bytes = bytes.fromhex(pi_digits[:len(data) * 2])
         
+        # Если xor_key это фиксированное значение (0x3F), вычисляем реальный ключ
+        # Реальный ключ = первый байт оригинальных данных ^ 0x3F
+        # Но мы не знаем первый байт оригинала, поэтому пробуем восстановить его
+        
+        if len(data) > 0 and xor_key == 0x3F:
+            # Пробуем восстановить первый байт оригинала
+            # Для этого пробуем разные возможные первые байты (0-255)
+            for potential_first_byte in range(256):
+                real_xor_key = potential_first_byte ^ 0x3F
+                
+                # Восстанавливаем данные с этим ключом
+                test_data = bytearray()
+                for i, byte in enumerate(data):
+                    if i < len(pi_bytes):
+                        original_byte = byte ^ (pi_bytes[i] if i < len(pi_bytes) else 0) ^ real_xor_key
+                    else:
+                        original_byte = byte ^ real_xor_key
+                    test_data.append(original_byte)
+                
+                # Проверяем, что первый байт совпадает с предполагаемым
+                if len(test_data) > 0 and test_data[0] == potential_first_byte:
+                    print(f"Найден правильный XOR ключ: 0x{real_xor_key:02X} (первый байт: 0x{potential_first_byte:02X})")
+                    return bytes(test_data)
+            
+            # Если не нашли подходящий ключ, используем стандартный
+            print(f"Используем стандартный XOR ключ: 0x{xor_key:02X}")
+        
+        # Стандартное восстановление XOR
         for i, byte in enumerate(data):
-            if i < len(pi_bytes):
-                original_byte = byte ^ pi_bytes[i] ^ xor_key
-            else:
-                original_byte = byte ^ xor_key
+            original_byte = byte ^ (pi_bytes[i] if i < len(pi_bytes) else 0) ^ xor_key
             reversed_data.append(original_byte)
         
         return bytes(reversed_data)
 
+
+# Добавляем метод found_positions в CompressionBlock
+def found_positions(self) -> bool:
+    """Проверяет, найдены ли позиции для блока"""
+    return self.start_pos is not None and self.end_pos is not None
+
+# Добавляем метод к классу
+CompressionBlock.found_positions = found_positions
 
 # Расширение класса CompressionBlock для удобства
 def CompressionBlock_found_positions(self) -> bool:
