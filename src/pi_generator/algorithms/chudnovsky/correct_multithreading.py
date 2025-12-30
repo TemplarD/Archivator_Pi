@@ -1,51 +1,43 @@
 #!/usr/bin/env python3
 """
-Многопоточные алгоритмы Chudnovsky
+Исправленная многопоточная реализация Chudnovsky с правильным разделением диапазонов
 """
 
-from abc import ABC, abstractmethod
-from decimal import Decimal, getcontext
+import os
 import time
 import threading
-from typing import List, Tuple, Optional, Callable
+from decimal import Decimal, getcontext
+from typing import Optional, Callable, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import os
 
-class BaseChudnovskyParallel(ABC):
-    """Базовый класс для многопоточных Chudnovsky генераторов"""
+class CorrectChudnovskyBinarySplitting:
+    """Исправленная реализация многопоточного Chudnovsky"""
     
     def __init__(self, cache_dir: Optional[str] = None):
         self.cache_dir = cache_dir
         if cache_dir:
             os.makedirs(cache_dir, exist_ok=True)
     
-    @abstractmethod
-    def compute_pi(self, digits: int, num_workers: int = 4, **kwargs) -> str:
-        """Вычисляет π с указанной точностью"""
-        pass
-    
-    @abstractmethod
     def get_algorithm_name(self) -> str:
-        """Возвращает название алгоритма"""
-        pass
-
-class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
-    """Многопоточный Chudnovsky с Binary Splitting и умной логикой"""
+        return "Chudnovsky (Correct Binary Splitting)"
     
-    def get_algorithm_name(self) -> str:
-        return "Chudnovsky (Binary Splitting, Multi-Thread)"
-    
-    def compute_pi(self, digits: int, num_workers: int = 4, 
-                   progress_callback: Optional[Callable] = None, **kwargs) -> str:
+    def compute_pi(self, digits: int, num_workers: int = 4, progress_callback: Optional[Callable] = None, **kwargs) -> str:
         """
-        Вычисляет π используя многопоточный Binary Splitting Chudnovsky с умной логикой
+        Исправленная многопоточная реализация Chudnovsky
+        
+        Ключевое исправление: каждый worker вычисляет независимую часть ряда
+        с правильными начальными значениями для своего диапазона
         """
+        start_time = time.time()
+        print(f"Вычисление {digits:,} цифр π с {num_workers} потоками...")
+        
+        # Установка точности
         precision = digits + 100
         getcontext().prec = precision
         
         # Проверяем кэш
         if self.cache_dir:
-            cache_file = os.path.join(self.cache_dir, f"chudnovsky_parallel_{digits}_{num_workers}.txt")
+            cache_file = os.path.join(self.cache_dir, f"chudnovsky_mt_{digits}_{num_workers}.txt")
             if os.path.exists(cache_file):
                 if progress_callback:
                     for i in range(0, 101, 10):
@@ -54,32 +46,12 @@ class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
                     progress_callback(100, 100, 100)
                 
                 with open(cache_file, 'r') as f:
-                    return f.read().strip()[:digits]
-        
-        print(f"Вычисление {digits:,} цифр π с {num_workers} потоками...")
-        start_time = time.time()
-        
-        # Создаем РАБОЧИЙ прогресс-бар
-        try:
-            from utils.working_progress import create_working_progress_bar
-            progress_bar = create_working_progress_bar("π", 20)
-            progress_bar(0)
-        except ImportError:
-            progress_bar = None
-        
-        # УМНАЯ ЛОГИКА: для малых объемов используем однопоточный для точности
-        if digits < 5000 or num_workers <= 1:
-            print("Используем однопоточный режим для точности...")
-            result = self._compute_single_thread_fallback(digits, progress_bar, progress_callback)
-            
-            elapsed = time.time() - start_time
-            print(f"Вычисление завершено за {elapsed:.2f} сек")
-            
-            return result
+                    result = f.read().strip()[:digits]
+                    print(f"Загружено из кэша за {time.time() - start_time:.2f} сек")
+                    return result
         
         # Вычисляем количество итераций
-        n = self._calculate_iterations(digits)
-        precision = digits + 100
+        n = int(digits / 14.18) + 3
         
         # Создаем задачи для потоков
         chunk_size = n // num_workers
@@ -97,7 +69,7 @@ class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
         completed = 0
         
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            future_to_task = {executor.submit(self._compute_chunk, task): task for task in tasks}
+            future_to_task = {executor.submit(self._compute_chunk_correct, task): task for task in tasks}
             
             for future in as_completed(future_to_task):
                 try:
@@ -127,16 +99,6 @@ class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
         # Обрезаем до нужной длины
         pi_str = str(pi)[:digits]
         
-        # Проверяем правильность результата
-        if not pi_str.startswith("3.14159265358979323846264338327950288419716939937510"):
-            print("❌ Многопоточный режим дал неверный результат, используем однопоточный...")
-            result = self._compute_single_thread_fallback(digits, progress_bar, progress_callback)
-            
-            elapsed = time.time() - start_time
-            print(f"Вычисление завершено за {elapsed:.2f} сек")
-            
-            return result
-        
         # Сохраняем в кэш
         if self.cache_dir:
             with open(cache_file, 'w') as f:
@@ -150,22 +112,10 @@ class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
         
         return pi_str
     
-    def _compute_single_thread_fallback(self, digits: int, progress_bar=None, progress_callback=None) -> str:
-        """Fallback на однопоточный для правильности"""
-        # Импортируем рабочий однопоточный алгоритм
-        from ..single_thread.chudnovsky_single_thread import ChudnovskySingleThread
-        
-        generator = ChudnovskySingleThread()
-        return generator.compute_pi(digits, progress_callback=progress_callback)
-    
-    def _calculate_iterations(self, digits: int) -> int:
-        """Вычисляет необходимое количество итераций"""
-        return int(digits / 14.18) + 3
-    
     @staticmethod
-    def _compute_chunk(args: Tuple[int, int, int, int]) -> Tuple[Decimal, Decimal, Decimal]:
+    def _compute_chunk_correct(args: Tuple[int, int, int, int]) -> Tuple[Decimal, Decimal, Decimal]:
         """
-        ИСПРАВЛЕННАЯ worker функция для Chudnovsky
+        ИСПРАВЛЕННАЯ worker функция
         
         Ключевое исправление: вычисляем каждый член ряда независимо,
         а не пытаемся продолжать рекуррентные соотношения через границы диапазонов
@@ -211,3 +161,45 @@ class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
         
         # Возвращаем частичную сумму
         return S, Decimal(1), Decimal(0)
+
+def test_correct_multithreading():
+    """Тест исправленной многопоточности"""
+    print("🧪 Тест исправленной многопоточности:")
+    print("=" * 60)
+    
+    generator = CorrectChudnovskyBinarySplitting()
+    
+    # Тест с 2 потоками
+    print("📊 2 потока (1000 цифр): ", end="")
+    start = time.time()
+    result2 = generator.compute_pi(1000, num_workers=2)
+    elapsed2 = time.time() - start
+    correct2 = result2.startswith("3.14159265358979323846264338327950288419716939937510")
+    print(f"{elapsed2:.3f}s, коррект: {correct2}")
+    print(f"   Результат: {result2[:50]}...")
+    
+    # Тест с 4 потоками
+    print("📊 4 потока (1000 цифр): ", end="")
+    start = time.time()
+    result4 = generator.compute_pi(1000, num_workers=4)
+    elapsed4 = time.time() - start
+    speedup = elapsed2 / elapsed4 if elapsed4 > 0 else 0
+    correct4 = result4.startswith("3.14159265358979323846264338327950288419716939937510")
+    print(f"{elapsed4:.3f}s, ускорение: {speedup:.2f}x, коррект: {correct4}")
+    print(f"   Результат: {result4[:50]}...")
+    
+    print()
+    print("🎯 Итог:")
+    print(f"2 потока: {'✅' if correct2 else '❌'} {'корректен' if correct2 else 'НЕ корректен'}")
+    print(f"4 потока: {'✅' if correct4 else '❌'} {'корректен' if correct4 else 'НЕ корректен'}")
+    
+    if correct2 and correct4:
+        print("🎉🎉🎉 МНОГОПОТОЧНОСТЬ ИСПРАВЛЕНА! 🎉🎉🎉")
+        print(f"🚀 Ускорение 4 потока: {speedup:.2f}x")
+        return True
+    else:
+        print("❌ Все еще есть проблемы")
+        return False
+
+if __name__ == "__main__":
+    test_correct_multithreading()
