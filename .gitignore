@@ -113,6 +113,21 @@ pi_storage/
 *.piarc.idx
 test_files/
 temp/
+extracted_test*/
+logs/
+*.blocks
+
+# Temporary files
+DEVELOPMENT_LOG_NEW.md
+*.tmp
+*.bak
+*.old
+*_backup
+
+# Test outputs
+test_output/
+test_archives/
+test_extracted/
 
 # IDE
 .vscode/
