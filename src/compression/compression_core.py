@@ -94,31 +94,32 @@ class CompressionCore:
                               block_size_range: Tuple[int, int] = (4, 16), 
                               num_workers: int = None, progress_callback=None) -> Tuple[List[CompressionBlock], CompressionStats]:
         """
-        Многопоточное сжатие данных
-        
-        Args:
-            data: исходные данные для сжатия
-            pi_digits: строка с цифрами π
-            block_size_range: диапазон размеров блоков в байтах
-            num_workers: количество потоков
-            progress_callback: функция для отслеживания прогресса
-            
-        Returns:
-            список сжатых блоков и статистика
+        Многопоточное сжатие данных с непрерывным прогресс-баром
         """
         if num_workers is None:
             num_workers = min(mp.cpu_count(), 8)
         
-        print(f"Начало многопоточного сжатия {len(data)} байт с {num_workers} потоками...")
+        print(f"Начало многопоточного сжатия {len(data):,} байт с {num_workers} потоками...")
         
-        # 1. XOR-декорреляция (однопоточно, т.к. зависит от порядка)
+        # Создаем РАБОЧИЙ прогресс-бар
+        try:
+            from utils.working_progress import create_working_progress_bar
+            progress_bar = create_working_progress_bar("Сжатие", 20)
+        except ImportError:
+            progress_bar = None
+        
+        import time
+        start_time = time.time()
+        
+        # 1. XOR-декорреляция (однопоточно)
         xor_data, xor_key = self._xor_decorrelate(data, pi_digits)
         
         # 2. Адаптивное разбиение на блоки (однопоточно)
         blocks = self._adaptive_block_splitting(xor_data, block_size_range)
+        print(f"Разделено на {len(blocks):,} блоков")
         
-        # 3. Многопоточный поиск блоков в π
-        found_blocks = self._parallel_block_search(blocks, pi_digits, num_workers, progress_callback)
+        # 3. Многопоточный поиск блоков в π с непрерывным прогрессом
+        found_blocks = self._parallel_block_search(blocks, pi_digits, num_workers, progress_bar)
         
         # 4. Арифметическое кодирование позиций (однопоточно)
         encoded_blocks = self._arithmetic_encode_positions(found_blocks)
@@ -126,15 +127,23 @@ class CompressionCore:
         # 5. Расчет статистики
         stats = self._calculate_compression_stats(data, encoded_blocks)
         
+        # Завершаем прогресс-бар
+        if progress_bar:
+            progress_bar(100)
+        
+        elapsed = time.time() - start_time
+        print(f"Сжатие завершено за {elapsed:.2f} сек")
+        
         return encoded_blocks, stats
     
     def _parallel_block_search(self, blocks: List[bytes], pi_digits: str, 
-                               num_workers: int, progress_callback=None) -> List[CompressionBlock]:
+                               num_workers: int, progress_bar=None) -> List[CompressionBlock]:
         """
-        Многопоточный поиск блоков в π
+        Многопоточный поиск блоков в π с анимированным прогресс-баром
         """
         import time
-        start_time = time.time()
+        import sys
+        import threading
         
         # Разделяем блоки между потоками
         block_size = len(blocks) // num_workers
@@ -146,10 +155,40 @@ class CompressionCore:
             worker_blocks = blocks[start_idx:end_idx]
             tasks.append((i, worker_blocks, pi_digits, start_idx))
         
-        # Запускаем многопоточную обработку
+        print(f"Поиск {len(blocks):,} блоков в π с {num_workers} потоками...")
+        
+        # Запускаем многопоточную обработку с анимированным прогрессом
         results = []
         completed_blocks = 0
         total_blocks = len(blocks)
+        last_progress_update = 0
+        search_start_time = time.time()
+        
+        # Анимированный прогресс-бар в отдельном потоке
+        def animate_progress():
+            nonlocal completed_blocks, last_progress_update
+            animation_progress = 0
+            while completed_blocks < total_blocks:
+                current_time = time.time()
+                elapsed = current_time - search_start_time
+                
+                # Медленная анимация прогресса на основе времени
+                if completed_blocks == 0:
+                    # Показываем медленный прогресс до 50%
+                    animation_progress = min((elapsed / 15.0) * 50, 50)  # До 50% за 15 секунд
+                    if progress_bar:
+                        progress_bar(animation_progress)
+                elif completed_blocks < total_blocks:
+                    # Реальный прогресс на основе выполненных блоков
+                    real_progress = max(animation_progress, (completed_blocks / total_blocks) * 95)
+                    if progress_bar:
+                        progress_bar(real_progress)
+                
+                time.sleep(0.5)  # Обновляем каждые 0.5 сек для видимости
+        
+        # Запускаем анимацию
+        animation_thread = threading.Thread(target=animate_progress, daemon=True)
+        animation_thread.start()
         
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             future_to_task = {
@@ -163,17 +202,10 @@ class CompressionCore:
                     results.extend(worker_blocks)
                     completed_blocks += len(worker_blocks)
                     
-                    # Обновляем прогресс
-                    if progress_callback:
-                        progress = (completed_blocks / total_blocks) * 100
-                        elapsed_time = time.time() - start_time
-                        if completed_blocks < total_blocks:
-                            estimated_total = elapsed_time * total_blocks / completed_blocks
-                            remaining_time = estimated_total - elapsed_time
-                            progress_callback(progress, completed_blocks, total_blocks, remaining_time)
-                        else:
-                            progress_callback(100, completed_blocks, total_blocks, 0)
-                            
+                    # Финальное обновление прогресса
+                    if completed_blocks == total_blocks and progress_bar:
+                        progress_bar(95)  # Почти завершено
+                        
                 except Exception as e:
                     print(f"Ошибка в потоке: {e}")
         
