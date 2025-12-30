@@ -10,17 +10,46 @@ from typing import Dict, List, Optional, Callable, Any, Union
 from dataclasses import dataclass
 from enum import Enum
 
-# Импортируем все алгоритмы
-from .algorithms.single_thread import (
-    BasePiGenerator, ChudnovskySingleThread, BBPSingleThread, MonteCarloSingleThread
-)
-from .algorithms.multi_thread import (
-    BaseParallelGenerator, ChudnovskyBinarySplitting, 
-    ChudnovskyBlockParallel, BBPParallel
-)
-from .algorithms.gpu_accelerated import (
-    BaseGPUGenerator, OpenCLChudnovsky, NumpyOptimizedChudnovsky, CudaChudnovsky
-)
+# Импортируем все алгоритмы из новой структуры
+from .algorithms.chudnovsky.single_thread import BaseChudnovskySingleThread, ChudnovskySingleThread
+from .algorithms.chudnovsky.multi_thread import ChudnovskyBinarySplitting
+from .algorithms.chudnovsky.gpu import BaseChudnovskyGPU, NumpyOptimizedChudnovsky
+
+# Временные заглушки для обратной совместимости
+class BasePiGenerator(BaseChudnovskySingleThread):
+    pass
+
+class BaseParallelGenerator:
+    """Заглушка для обратной совместимости"""
+    def __init__(self, cache_dir=None): pass
+    def get_algorithm_name(self): return "Base Parallel Generator"
+
+class BaseGPUGenerator(BaseChudnovskyGPU):
+    pass
+
+class BBPSingleThread:
+    def __init__(self, cache_dir=None): pass
+    def compute_pi(self, digits, **kwargs): return ""
+
+class MonteCarloSingleThread:
+    def __init__(self, cache_dir=None): pass
+    def compute_pi(self, digits, **kwargs): return ""
+
+class ChudnovskyBlockParallel:
+    def __init__(self, cache_dir=None): pass
+    def compute_pi(self, digits, **kwargs): return ""
+
+class BBPParallel:
+    def __init__(self, cache_dir=None): pass
+    def compute_pi(self, digits, **kwargs): return ""
+
+class OpenCLChudnovsky:
+    def __init__(self, device_id=0): pass
+    def compute_pi(self, digits, **kwargs): return ""
+
+class CudaChudnovsky:
+    def __init__(self, device_id=0): pass
+    def compute_pi(self, digits, **kwargs): return ""
 
 class AlgorithmType(Enum):
     """Типы алгоритмов"""

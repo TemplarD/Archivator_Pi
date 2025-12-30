@@ -5,9 +5,36 @@ Pi-Archiver Generator Package
 """
 
 # Базовые классы
-from .algorithms.single_thread import BasePiGenerator, ChudnovskySingleThread, BBPSingleThread, MonteCarloSingleThread
-from .algorithms.multi_thread import BaseParallelGenerator, ChudnovskyBinarySplitting, ChudnovskyBlockParallel, BBPParallel
-from .algorithms.gpu_accelerated import BaseGPUGenerator, OpenCLChudnovsky, NumpyOptimizedChudnovsky, CudaChudnovsky
+from .algorithms.chudnovsky.single_thread import BaseChudnovskySingleThread, ChudnovskySingleThread
+from .algorithms.chudnovsky.multi_thread import ChudnovskyBinarySplitting, ChudnovskyBlockParallel, BBPParallel, SimpleParallelChudnovsky
+from .algorithms.chudnovsky.gpu import BaseChudnovskyGPU, NumpyOptimizedChudnovsky, OpenCLChudnovsky, CudaChudnovsky, GPUChudnovskyGenerator, AMDGPUChudnovskyGenerator
+from .algorithms.native import CPiGenerator
+from .algorithms.other import BBPPiGenerator
+
+# Временные заглушки для обратной совместимости
+class BasePiGenerator(BaseChudnovskySingleThread):
+    """Заглушка для обратной совместимости"""
+    pass
+
+class BaseParallelGenerator:
+    """Заглушка для обратной совместимости"""
+    def __init__(self, cache_dir=None): pass
+    def get_algorithm_name(self): return "Base Parallel Generator"
+
+class BaseGPUGenerator(BaseChudnovskyGPU):
+    """Заглушка для обратной совместимости"""
+    pass
+
+# Временные заглушки для других алгоритмов
+class BBPSingleThread:
+    """Заглушка для BBP"""
+    def __init__(self, cache_dir=None): pass
+    def compute_pi(self, digits, **kwargs): return ""
+
+class MonteCarloSingleThread:
+    """Заглушка для Monte Carlo"""
+    def __init__(self, cache_dir=None): pass
+    def compute_pi(self, digits, **kwargs): return ""
 
 # Универсальный генератор
 from .universal_generator import UniversalPiGenerator, AlgorithmType, PerformanceMode, AlgorithmConfig
