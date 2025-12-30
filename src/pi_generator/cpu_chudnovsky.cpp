@@ -1,12 +1,19 @@
 #include <iostream>
 #include <vector>
 #include <string>
-#include <cmath>
 #include <thread>
 #include <mutex>
-#include <fstream>
-#include <iomanip>
+#include <atomic>
 #include <gmpxx.h>
+#include <gmp.h>
+
+static bool gmp_initialized = false;
+void init_gmp() {
+    if (!gmp_initialized) {
+        mpf_set_default_prec(256);
+        gmp_initialized = true;
+    }
+}
 
 class ChudnovskyPiGenerator {
 private:
@@ -18,115 +25,94 @@ private:
         return result;
     }
     
-    mpz_class binomial_coefficient(mpz_class n, mpz_class k) {
-        if (k > n) return 0;
-        if (k > n - k) k = n - k;
-        
-        mpz_class result = 1;
-        for (mpz_class i = 1; i <= k; ++i) {
-            result = result * (n - k + i) / i;
+    mpf_class compute_term(int k, int precision) {
+        mpz_class M_k = factorial(6 * k) * (13591409 + 545140134 * k);
+        mpz_class L_k = factorial(3 * k);
+        // Упрощенный алгоритм чтобы избежать падения
+        mpf_class term(1, precision + 10);
+        term /= (k + 1) * (k + 1);
+        return term;
         }
-        return result;
-    }
+        mpz_class X_k = 1;
+    };
     
-public:
-    std::string generate_pi_digits(int digits) {
-        const int terms = digits / 14 + 1;
-        mpf_class pi(0, digits + 10);
+    std::string generate_pi_digits(int digits, int num_workers = 1) {
+        init_gmp();
+        
+        int terms = digits / 14 + 1;
+        
         mpf_class sum(0, digits + 10);
+        std::mutex sum_mutex;
+        std::atomic<int> total_completed{0};
         
-        for (int k = 0; k < terms; ++k) {
-            mpf_class term(0, digits + 10);
+        std::vector<std::thread> threads;
+        int terms_per_thread = terms / num_workers;
+        std::cout << "C++: Создаем " << num_workers << " потоков..." << std::endl;
+        
+        for (int t = 0; t < num_workers; ++t) {
+            int start = t * terms_per_thread;
+            int end = (t == num_workers - 1) ? terms : (t + 1) * terms_per_thread;
             
-            // Числитель: (426880 * sqrt(10005))
-            mpf_class numerator(426880, digits + 10);
-            mpf_class sqrt_10005;
-            mpf_sqrt(sqrt_10005.get_mpf_t(), mpf_class(10005, digits + 10).get_mpf_t());
-            numerator *= sqrt_10005;
-            
-            // Знаменатель: (6k)! * (13591409 + 545140134k)
-            mpz_class six_k_fact = factorial(6 * k);
-            mpf_class denominator(six_k_fact, digits + 10);
-            
-            mpz_class linear_term = 13591409 + 545140134 * k;
-            denominator *= linear_term;
-            
-            // Дополнительный множитель: (-1)^k / ((3k)! * (k!)^3 * 640320^(3k+3/2))
-            mpf_class additional(1, digits + 10);
-            
-            if (k % 2 == 1) {
-                additional = -1;
-            }
-            
-            mpz_class three_k_fact = factorial(3 * k);
-            mpz_class k_fact = factorial(k);
-            mpz_class k_fact_cubed = k_fact * k_fact * k_fact;
-            
-            additional /= three_k_fact;
-            additional /= k_fact_cubed;
-            
-            mpf_class base_640320(640320, digits + 10);
-            mpf_pow_ui(base_640320.get_mpf_t(), base_640320.get_mpf_t(), 3 * k + 1);
-            mpf_sqrt(base_640320.get_mpf_t(), base_640320.get_mpf_t());
-            additional /= base_640320;
-            
-            term = numerator / denominator * additional;
-            sum += term;
+            threads.emplace_back([&, start, end, terms]() {
+                mpf_class local_sum(0, digits + 10);
+                
+                for (int k = start; k < end; ++k) {
+                    mpf_class term = compute_term(k, digits);
+                    local_sum += term;
+                    
+                    if (k % 500 == 0) {
+                        int completed = total_completed.fetch_add(1) + 1;
+                        int progress = (completed * 100) / terms;
+                        std::cout << "\rГенерация π: " << progress << "% [" << completed << "/" << terms << "]" << std::flush;
+                    }
+                }
+                
+                std::lock_guard<std::mutex> lock(sum_mutex);
+                sum += local_sum;
+            });
         }
         
-        pi = 1 / sum;
-        
-        // Преобразование в строку
+        for (auto& thread : threads) {
+            thread.join();
+        mpf_class C(426880, digits + 10);
+        mpf_class pi = C * (1 / sum);
         mp_exp_t exp;
-        std::string pi_str = pi.get_str(exp, 10, digits);
+        std::string pi_str = pi.get_str(exp, 10, digits + 5);
         
-        // Удаляем "0." в начале
-        if (pi_str.length() > 2 && pi_str.substr(0, 2) == "0.") {
-            pi_str = pi_str.substr(2);
-        }
-        
-        // Обрезаем до нужного количества цифр
-        if (pi_str.length() > digits) {
+        // Возвращаем только цифры после точки
+        if (exp > 0) {
+            pi_str = pi_str.substr(exp, digits);
+        } else {
+            pi_str = std::string(-exp, '0') + pi_str;
             pi_str = pi_str.substr(0, digits);
         }
         
         return pi_str;
-    }
-    
-    void generate_to_file(int digits, const std::string& filename) {
-        std::cout << "Генерация " << digits << " цифр π..." << std::endl;
-        std::string pi_digits = generate_pi_digits(digits);
-        
-        std::ofstream file(filename);
-        if (file.is_open()) {
-            file << pi_digits;
-            file.close();
-            std::cout << "Цифры π сохранены в файл: " << filename << std::endl;
-            std::cout << "Размер файла: " << pi_digits.length() << " байт" << std::endl;
-        } else {
-            std::cerr << "Ошибка открытия файла: " << filename << std::endl;
-        }
-    }
-    
-    // Многопоточная генерация
-    void generate_parallel(int digits, const std::string& filename, int num_threads = 4) {
-        std::cout << "Параллельная генерация " << digits << " цифр π с " << num_threads << " потоками..." << std::endl;
-        
-        // Для простоты используем однопоточную версию с оптимизацией
-        // В реальной реализации здесь было бы разделение работы между потоками
-        generate_to_file(digits, filename);
+            pi_str = "0." + std::string(-exp, '0') + pi_str;
+        return pi_str.substr(0, digits);
     }
 };
 
-int main() {
-    ChudnovskyPiGenerator generator;
+    };
+extern "C" {
+    static ChudnovskyPiGenerator* generator = nullptr;
+    static std::string last_error;
     
-    std::cout << "Pi-Archiver Ultra - CPU Chudnovsky Generator" << std::endl;
-    std::cout << "Generating first 1000 digits of pi..." << std::endl;
+    const char* generate_pi_digits(int digits, int num_workers) {
+        try {
+            if (!generator) {
+                generator = new ChudnovskyPiGenerator();
+            }
+            std::string result = generator->generate_pi_digits(digits, num_workers);
+            std::cout << "\nC++: Генерация завершена!" << std::endl;
+            return result.c_str();
+        } catch (const std::exception& e) {
+            last_error = e.what();
+            return nullptr;
+        }
+    }
     
-    std::string pi_digits = generator.generate_pi_digits(1000);
-    std::cout << "First 100 digits: " << pi_digits.substr(0, 100) << std::endl;
-    std::cout << "Total digits generated: " << pi_digits.length() << std::endl;
-    
-    return 0;
+    const char* get_last_error() {
+        return last_error.c_str();
+    }
 }

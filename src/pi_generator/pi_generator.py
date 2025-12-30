@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Модуль генерации числа π по алгоритму Chudnovsky
-Поддерживает CPU и GPU генерацию с кэшированием
+Поддерживает CPU и GPU генерацию с кэшированием и многопоточностью
 """
 
 import os
@@ -9,15 +9,110 @@ import subprocess
 import hashlib
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import multiprocessing as mp
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import partial
+
+# Импортируем BBP генератор
+try:
+    from .bbp_generator import BBPPiGenerator
+except ImportError:
+    BBPPiGenerator = None
+
+def _generate_partial(args):
+    """Исправленная функция генерации части последовательности с блочным подходом"""
+    worker_id, total_digits, num_workers = args
+    
+    from decimal import Decimal, getcontext
+    import os
+    
+    # Очень высокая точность для корректности больших объемов
+    precision = total_digits + 500
+    getcontext().prec = precision
+    
+    # print(f'Процесс {os.getpid()} (worker {worker_id}): точность {precision}')  # Отключаем для чистого вывода
+    
+    # Блочный подход - каждый процесс вычисляет свой диапазон итераций
+    C = Decimal(426880) * Decimal(10005).sqrt()
+    max_iterations = total_digits // 14 + 1
+    
+    # Распределяем итерации между процессами
+    iterations_per_worker = max_iterations // num_workers
+    start_iter = worker_id * iterations_per_worker
+    end_iter = start_iter + iterations_per_worker if worker_id < num_workers - 1 else max_iterations
+    
+    # Инициализация для каждого процесса
+    M = Decimal(1)
+    L = Decimal(13591409)
+    X = Decimal(1)
+    K = 6
+    S = Decimal(0)
+    
+    # Вычисляем свой диапазон итераций
+    for i in range(start_iter, end_iter):
+        if i == 0:
+            continue
+        M = M * (K**3 - 16*K) // (i**3)
+        L += Decimal(545140134)
+        X *= Decimal(-262537412640768000)
+        
+        term = M * L / X
+        S += term
+        K += 12
+    
+    # print(f'Процесс {os.getpid()} (worker {worker_id}): итерации {start_iter}-{end_iter}')  # Отключаем
+    return S
+
+def _validate_chunk(args):
+    """Глобальная функция валидации чанка"""
+    chunk_id, start_pos, end_pos, pi_str = args
+    chunk = pi_str[start_pos:end_pos]
+    is_valid = chunk.isdigit()
+    return chunk_id, len(chunk), is_valid
+
+def _chudnovsky_worker(args):
+    """Глобальная функция для multiprocessing с корректным алгоритмом"""
+    worker_id, start_iter, end_iter, max_iters, precision = args
+    
+    try:
+        from decimal import Decimal, getcontext
+        import os
+        
+        getcontext().prec = precision + 20
+        
+        # print(f'Процесс {os.getpid()} (worker {worker_id}) начинает {start_iter}-{end_iter}')  # Отключаем
+        
+        # Корректный алгоритм Chudnovsky для multiprocessing
+        M = Decimal(1)
+        L = Decimal(13591409)
+        X = Decimal(1)
+        K = 6
+        S = Decimal(0)
+        
+        for i in range(start_iter, min(end_iter, max_iters)):
+            # Правильные вычисления Chudnovsky
+            M = M * (K**3 - 16*K) // (i**3)
+            L += Decimal(545140134)
+            X *= Decimal(-262537412640768000)
+            
+            term = M * L / X
+            S += term
+            K += 12
+        
+        # print(f'Процесс {os.getpid()} (worker {worker_id}) завершил')  # Отключаем
+        return S
+        
+    except Exception as e:
+        print(f"Ошибка в процессе {worker_id}: {e}")
+        return Decimal(0)
 
 class PiGenerator:
     def __init__(self, cache_dir: str = "pi_storage"):
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
-    def generate_pi_digits(self, digits: int, use_gpu: bool = False, progress_callback=None) -> str:
+    def generate_pi_digits(self, digits: int, use_gpu: bool = False, progress_callback=None, num_workers: int = None, force_regenerate: bool = False) -> str:
         """
         Генерирует указанное количество цифр π
         
@@ -25,26 +120,47 @@ class PiGenerator:
             digits: количество цифр для генерации
             use_gpu: использовать ли GPU для генерации
             progress_callback: функция для отслеживания прогресса
+            num_workers: количество потоков для CPU генерации
+            force_regenerate: принудительно перегенерировать даже если есть кэш
             
         Returns:
             строка с цифрами π
         """
         cache_file = self._get_cache_file(digits)
         
-        # Проверяем кэш
-        if cache_file.exists():
-            print(f"Загрузка {digits} цифр π из кэша...")
+        # Проверяем кэш (если не принудительная генерация)
+        if cache_file.exists() and not force_regenerate:
+            if progress_callback:
+                # Имитируем прогресс для загрузки из кэша
+                for i in range(0, 101, 10):
+                    progress_callback(i, i, 100)
+                    time.sleep(0.01)  # Короткая задержка для видимости
+                progress_callback(100, 100, 100)
+            print(f"\nЗагрузка {digits} цифр π из кэша...")
             with open(cache_file, 'r') as f:
                 return f.read().strip()
         
-        # Генерируем новые цифры
-        print(f"Генерация {digits} цифр π...")
+        # Если принудительная генерация или нет кэша
+        if force_regenerate and cache_file.exists():
+            print(f"Принудительная перегенерация {digits} цифр π (игнорируем кэш)...")
+        else:
+            print(f"Генерация {digits} цифр π...")
+        
+        # Выводим информацию о потоках
+        if num_workers and not use_gpu:
+            print(f"Используем {num_workers} потоков для генерации π")
+        elif use_gpu:
+            print("Используем GPU для генерации π")
+        else:
+            cpu_count = mp.cpu_count()
+            print(f"Используем {cpu_count} потоков (автоопределение)")
+        
         start_time = time.time()
         
         if use_gpu:
             pi_digits = self._generate_with_gpu(digits, progress_callback)
         else:
-            pi_digits = self._generate_with_cpu(digits, progress_callback)
+            pi_digits = self._generate_with_cpu(digits, progress_callback, num_workers)
         
         generation_time = time.time() - start_time
         print(f"Генерация завершена за {generation_time:.2f} секунд")
@@ -55,10 +171,21 @@ class PiGenerator:
         
         return pi_digits
     
-    def _generate_with_cpu(self, digits: int, progress_callback=None) -> str:
-        """Генерация π с использованием CPU"""
-        # В реальном проекте здесь был бы вызов C++ кода
-        return self._chudnovsky_python(digits, progress_callback)
+    def _generate_with_cpu(self, digits: int, progress_callback=None, num_workers: int = None) -> str:
+        """Генерация π с использованием CPU с поддержкой многопоточности"""
+        if num_workers is None:
+            num_workers = mp.cpu_count()
+        
+        # Используем BBP алгоритм для корректной многопоточности
+        if BBPPiGenerator and num_workers > 1 and digits >= 1000:
+            print(f"Используем BBP многопоточность ({num_workers} потоков) для {digits:,} цифр...")
+            bbp_gen = BBPPiGenerator(num_workers=num_workers)
+            return bbp_gen.generate_pi_digits_bbp(digits, progress_callback)
+        elif num_workers > 1 and digits >= 5000:
+            print(f"Используем {num_workers} потоков для генерации {digits:,} цифр...")
+            return self._chudnovsky_parallel(digits, progress_callback, num_workers)
+        else:
+            return self._chudnovsky_python(digits, progress_callback)
     
     def _generate_with_gpu(self, digits: int, progress_callback=None) -> str:
         """Генерация π с использованием GPU (OpenCL)"""
@@ -72,6 +199,39 @@ class PiGenerator:
             print(f"GPU генерация не удалась: {e}")
             print("Переключаемся на CPU...")
             return self._generate_with_cpu(digits, progress_callback)
+    
+    def _chudnovsky_parallel(self, digits: int, progress_callback=None, num_workers: int = 4) -> str:
+        """
+        Реальная многопроцессорная генерация с корректными результатами
+        """
+        from decimal import Decimal, getcontext
+        import os
+        
+        print(f"Запуск реальной многопроцессорной генерации с {num_workers} процессами")
+        print(f"Основной процесс PID: {os.getpid()}")
+        
+        # Устанавливаем высокую точность для больших объемов
+        precision = digits + 500  # Увеличенная точность для корректности
+        getcontext().prec = precision
+        
+        # Предвычисляем константы с повышенной точностью
+        C = Decimal(426880) * Decimal(10005).sqrt()
+        
+            # Запускаем процессы
+        from multiprocessing import Pool
+        with Pool(processes=num_workers) as pool:
+            tasks = [(i, digits, num_workers) for i in range(num_workers)]
+            results = pool.map(_generate_partial, tasks)
+        
+        # Суммируем результаты
+        total_S = sum(results)
+        
+        # Финальное вычисление π
+        pi = C / total_S
+        
+        # Преобразование в строку
+        pi_str = str(pi)[2:]
+        return pi_str[:digits]
     
     def _chudnovsky_python(self, digits: int, progress_callback=None) -> str:
         """

@@ -52,8 +52,6 @@ except ImportError:
 
 # Остальные импорты с динамической загрузкой
 from pi_generator.pi_generator import PiGenerator
-import multiprocessing as mp
-import platform
 from search_engine.pi_search import PiSearchEngine
 from compression.compression_core import CompressionCore, CompressionBlock, CompressionStats
 
@@ -113,83 +111,6 @@ class PiArchiverUltra:
         self.logger = logging.getLogger(__name__)
         self.logger.setLevel(logging.INFO)
     
-    def _get_system_info(self) -> dict:
-        """Возвращает информацию о системе и потоках"""
-        info = {
-            'platform': f'{platform.system()} {platform.release()}',
-            'processor': platform.processor(),
-            'cpu_count_logical': mp.cpu_count(),
-            'available_cores': mp.cpu_count()
-        }
-        
-        # Получаем количество доступных ядер для текущего процесса
-        try:
-            import os
-            info['available_cores'] = len(os.sched_getaffinity(0))
-        except AttributeError:
-            pass
-        
-        # Анализируем архитектуру процессоров
-        try:
-            with open('/proc/cpuinfo', 'r') as f:
-                cpuinfo = f.read()
-                
-                # Количество физических процессоров
-                physical_ids = set()
-                for line in cpuinfo.split('\n'):
-                    if line.startswith('physical id'):
-                        physical_ids.add(line.split(':')[1].strip())
-                
-                # Количество ядер на процессор
-                cores_per_cpu = None
-                for line in cpuinfo.split('\n'):
-                    if line.startswith('cpu cores'):
-                        cores_per_cpu = int(line.split(':')[1].strip())
-                        break
-                
-                info['physical_processors'] = len(physical_ids)
-                info['cores_per_processor'] = cores_per_cpu
-                info['total_physical_cores'] = len(physical_ids) * (cores_per_cpu or 1)
-                
-        except Exception as e:
-            # Запасной вариант
-            info['physical_processors'] = 1
-            info['cores_per_processor'] = info['cpu_count_logical']
-            info['total_physical_cores'] = info['cpu_count_logical']
-        
-        return info
-    
-    def _print_thread_info(self, num_workers: int = None):
-        """Выводит информацию о потоках и рекомендациях"""
-        info = self._get_system_info()
-        
-        print('=== Информация о потоках и процессорах ===')
-        print(f'Платформа: {info["platform"]}')
-        print(f'Процессор: {info["processor"]}')
-        print(f'Физических процессоров: {info["physical_processors"]}')
-        print(f'Ядер на процессор: {info["cores_per_processor"]}')
-        print(f'Всего физических ядер: {info["total_physical_cores"]}')
-        print(f'Логических потоков: {info["cpu_count_logical"]}')
-        print(f'Доступно потоков процессу: {info["available_cores"]}')
-        
-        if num_workers:
-            print(f'Будет использоваться потоков: {num_workers}')
-            efficiency = (num_workers / info['available_cores']) * 100
-            print(f'Эффективность использования: {efficiency:.1f}%')
-        
-        # Рекомендации по количеству потоков
-        if info['total_physical_cores'] >= 20:
-            # Для мощных систем (2+ процессора)
-            optimal_workers = min(info['total_physical_cores'], 16)
-        else:
-            # Для обычных систем
-            optimal_workers = min(info['available_cores'], 8)
-        
-        print(f'Рекомендуемое количество потоков: {optimal_workers}')
-        print('=' * 55)
-        
-        return optimal_workers
-    
     def _load_config(self, config_file: str = None) -> dict:
         """Загружает конфигурацию из YAML файла"""
         if config_file is None:
@@ -214,8 +135,8 @@ class PiArchiverUltra:
         
         # Конфигурация по умолчанию
         return {
-            'pi_file_path': 'pi_storage/pi_10000_digits.txt',
-            'default_precision': 10000,
+            'pi_file_path': 'pi_storage/pi_1000000_digits.txt',
+            'default_precision': 1000000,
             'use_existing_file': True,
             'custom_pi_directory': 'custom_pi',
             'auto_generate': True
@@ -252,7 +173,7 @@ class PiArchiverUltra:
         print(f"Кэш π: {cache_dir}")
         print(f"Индексы: {index_dir}")
     
-    def archive_file(self, input_path: str, output_name: Optional[str] = None, output_dir: Optional[str] = None, use_gpu: bool = False, num_workers: int = None, no_backup: bool = False, force_regenerate: bool = False) -> str:
+    def archive_file(self, input_path: str, output_name: Optional[str] = None, output_dir: Optional[str] = None, use_gpu: bool = False, num_workers: int = None, no_backup: bool = False) -> str:
         """
         Архивирует один файл
         
@@ -282,6 +203,10 @@ class PiArchiverUltra:
         
         self.logger.info(f"Начало архивации: {input_path}")
         self.logger.info(f"Размер файла: {input_path.stat().st_size:,} байт")
+        self.logger.info(f"Директория сохранения: {output_path.parent}")
+        
+        print(f"Начало архивации: {input_path}")
+        print(f"Размер файла: {input_path.stat().st_size:,} байт")
         print(f"📁 Директория сохранения: {output_path.parent}")
         
         start_time = time.time()
@@ -294,129 +219,66 @@ class PiArchiverUltra:
         progress_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
         
         def progress_callback(progress_percent, current_iter, total_iters):
-            """Улучшенный callback для реального прогресса генерации"""
+            """Callback для реального прогресса генерации"""
             # Расчет оставшегося времени
             elapsed = time_module.time() - start_time
-            if progress_percent > 0 and progress_percent < 99.9:
+            if progress_percent > 0:
                 estimated_total = elapsed / (progress_percent / 100)
                 remaining = estimated_total - elapsed
-                if remaining > 0:
-                    if remaining > 3600:
-                        time_str = f" (осталось ~{remaining/3600:.1f} ч)"
-                    elif remaining > 60:
-                        time_str = f" (осталось ~{remaining/60:.1f} мин)"
-                    else:
-                        time_str = f" (осталось ~{remaining:.0f} сек)"
-                else:
-                    time_str = " (почти завершено)"
-            elif progress_percent >= 99.9:
-                time_str = " (почти завершено)"
+                minutes = int(remaining // 60)
+                seconds = int(remaining % 60)
+                time_str = f" (осталось ~{minutes}:{seconds:02d})"
             else:
                 time_str = ""
-            
-            # Улучшенный прогресс-бар
-            bar_length = 30
-            filled_length = int(bar_length * progress_percent / 100)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-            
-            # Скорость генерации
-            if elapsed > 0 and current_iter > 0:
-                rate = current_iter / elapsed
-                if rate > 1000:
-                    rate_str = f"{rate/1000:.1f}K итер/сек"
-                else:
-                    rate_str = f"{rate:.0f} итер/сек"
-            else:
-                rate_str = ""
             
             # Детальная информация о вычислениях
             self.logger.debug(f"Итерация {current_iter}/{total_iters} ({progress_percent:.1f}%)")
             
-            import sys
-            # Короткий прогресс-бар
-            bar_length = 20
-            filled_length = int(bar_length * progress_percent / 100)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-            
-            sys.stdout.write(f"\rπ: |{bar}| {progress_percent:3.0f}%")
-            sys.stdout.flush()
+            print(f"\r{progress_chars[int(progress_percent) % len(progress_chars)]} Генерация π: {progress_percent:.1f}% [{current_iter:,}/{total_iters:,}]{time_str}", end="", flush=True)
         
         start_time = time_module.time()
         self.logger.info(f"Начало генерации {self.pi_precision:,} цифр π (GPU: {use_gpu})")
         
         # Передаем callback для реального прогресса
-        # Определяем количество потоков для генерации π
-        if num_workers is None:
-            num_workers = min(mp.cpu_count(), 8)  # Ограничиваем до 8 потоков
-        print(f"Используем {num_workers} потоков для генерации π\n")
-        
-        pi_digits = self.pi_generator.generate_pi_digits(
-            self.pi_precision, use_gpu, progress_callback, num_workers, force_regenerate
-        )
+        pi_digits = self.pi_generator.generate_pi_digits(self.pi_precision, use_gpu, progress_callback)
         
         generation_time = time_module.time() - start_time
         self.logger.info(f"Генерация π завершена, длина: {len(pi_digits):,} цифр, время: {generation_time:.2f} сек")
-        print(f"\n✅ Генерация завершена! [{len(pi_digits):,} цифр за {generation_time:.2f} сек]")
+        print(f"\r✅ Генерация завершена! [{len(pi_digits):,} цифр за {generation_time:.2f} сек] {' ' * 30}")
         # Функция для отображения прогресса сжатия
-        compression_start_time = time_module.time()
         def compression_progress_callback(progress, current, total, remaining_time=None):
-            bar_length = 40
+            bar_length = 50
             filled_length = int(bar_length * progress / 100)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
+            bar = '█' * filled_length + '-' * (bar_length - filled_length)
             
-            # Скорость сжатия
-            elapsed = time_module.time() - compression_start_time
-            if elapsed > 0 and current > 0:
-                rate = current / elapsed
-                if rate > 1000:
-                    rate_str = f"{rate/1000:.1f}K блок/сек"
-                else:
-                    rate_str = f"{rate:.0f} блок/сек"
-            else:
-                rate_str = ""
+            # Используем терминальные последовательности для очистки строки
+            import sys
+            sys.stdout.write('\033[F')  # Перемещаем курсор на строку вверх
+            sys.stdout.write('\033[K')  # Очищаем строку до конца
             
-            # Время оставшееся
             if remaining_time is not None:
                 if remaining_time > 3600:
-                    time_str = f" (~{remaining_time/3600:.1f} ч)"
+                    time_str = f"{remaining_time/3600:.1f} ч"
                 elif remaining_time > 60:
-                    time_str = f" (~{remaining_time/60:.1f} мин)"
+                    time_str = f"{remaining_time/60:.1f} мин"
                 else:
-                    time_str = f" (~{remaining_time:.0f} сек)"
+                    time_str = f"{remaining_time:.0f} сек"
+                sys.stdout.write(f"Сжатие: |{bar}| {progress:.1f}% ({current}/{total} блоков) Осталось: {time_str}")
             else:
-                time_str = ""
-            
-            # Очищаем строку и выводим прогресс
-            import sys
-            bar_length = 20
-            filled_length = int(bar_length * progress / 100)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-            
-            # Не очищаем строку полностью, только обновляем прогресс
-            sys.stdout.write(f"\rСж: |{bar}| {progress:3.0f}%")
+                sys.stdout.write(f"Сжатие: |{bar}| {progress:.1f}% ({current}/{total} блоков)")
             sys.stdout.flush()
             
             if progress >= 100:
-                print()  # Перенос строки после завершения сжатия
+                print()
 
         
         # 2. Читаем файл
         with open(input_path, 'rb') as f:
             file_data = f.read()
         
-        # 3. Сжимаем данные с многопоточностью
+        # 3. Сжимаем данные
         print("Сжатие данных...")
-        use_parallel = len(file_data) > 10240  # Используем параллельность для файлов > 10KB
-        
-        if use_parallel:
-            print(f"Используем параллельное сжатие ({num_workers} потоков)...\n")
-            blocks, stats = self.compression_core.compress_data(
-                file_data, pi_digits, progress_callback=compression_progress_callback
-            )
-        else:
-            blocks, stats = self.compression_core.compress_data(
-                file_data, pi_digits, progress_callback=compression_progress_callback
-            )
+        blocks, stats = self.compression_core.compress_data(file_data, pi_digits, progress_callback=compression_progress_callback)
         
         # Получаем реальный XOR ключ из процесса сжатия
         xor_data, real_xor_key = self.compression_core._xor_decorrelate(file_data, pi_digits)
@@ -543,50 +405,8 @@ class PiArchiverUltra:
         processed_blocks = 0
         processed_files = 0
         total_files = len(index.get("files", []))
-        extraction_start_time = time.time()
         
         print(f"Восстановление данных ({total_files} файлов, {total_blocks} блоков)...")
-        
-        def update_extraction_progress():
-            """Обновляет прогресс-бар извлечения"""
-            nonlocal processed_files, processed_blocks, total_files, total_blocks
-            
-            # Общий прогресс
-            if total_blocks > 0:
-                progress = (processed_blocks / total_blocks) * 100
-            else:
-                progress = 0
-            
-            # Прогресс-бар
-            bar_length = 40
-            filled_length = int(bar_length * progress / 100)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-            
-            # Скорость извлечения
-            elapsed = time.time() - extraction_start_time
-            if elapsed > 0 and processed_blocks > 0:
-                rate = processed_blocks / elapsed
-                if rate > 1000:
-                    rate_str = f"{rate/1000:.1f}K блок/сек"
-                else:
-                    rate_str = f"{rate:.0f} блок/сек"
-            else:
-                rate_str = ""
-            
-            # Время
-            if elapsed > 60:
-                time_str = f" ({elapsed/60:.1f} мин)"
-            else:
-                time_str = f" ({elapsed:.0f} сек)"
-            
-            import sys
-            bar_length = 20
-            filled_length = int(bar_length * progress / 100)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-            
-            # Не очищаем строку полностью, только обновляем прогресс
-            sys.stdout.write(f"\rИзв: |{bar}| {progress:3.0f}%")
-            sys.stdout.flush()
         
         extracted_files = []
         
@@ -641,44 +461,80 @@ class PiArchiverUltra:
                             data_hash=block_data.get("data_hash", "")
                         ))
                     
-                    # Обновляем прогресс-бар
+                    # Обновляем прогресс-бар (общий и по файлу) - выводим только каждый 10-й блок для уменьшения дублирования
                     processed_blocks += 1
                     file_blocks_processed += 1
                     
-                    # Обновляем прогресс реже - каждые 10 блоков или в конце
-                    if file_blocks_processed % 10 == 0 or file_blocks_processed == file_blocks_total:
-                        update_extraction_progress()
+                    # Выводим прогресс только в конце файла - как работает
+                    if file_blocks_processed == file_blocks_total:
+                        # Общий прогресс - правильный расчет без отрицательных чисел
+                        current_file_progress = file_blocks_processed / file_blocks_total if file_blocks_total > 0 else 0
+                        completed_files = processed_files - 1 if processed_files > 0 else 0
+                        total_progress = ((completed_files + current_file_progress) / total_files) * 100 if total_files > 0 else 0
+                        
+                        # Прогресс по текущему файлу
+                        file_progress = current_file_progress * 100
+                        
+                        # Объединенный прогресс-бар как в архивации
+                        bar_length = 50
+                        total_filled_length = int(bar_length * (completed_files + current_file_progress) / total_files) if total_files > 0 else 0
+                        total_bar = '█' * total_filled_length + '-' * (bar_length - total_filled_length)
+                        
+                        # Выводим прогресс с терминальными последовательностями как в архивации
+                        import sys
+                        sys.stdout.write('\033[F')  # Перемещаем курсор на строку вверх
+                        sys.stdout.write('\033[K')  # Очищаем строку до конца
+                        sys.stdout.write(f"Извлечение: |{total_bar}| {total_progress:.1f}% ({processed_files}/{total_files} файлов)")
+                        sys.stdout.flush()
                 
                 # Счетчики для статистики восстановления
                 pi_blocks = 0
                 backup_blocks = 0
+
+                decompressed_data = self.compression_core.decompress_data(
+                    compression_blocks, pi_digits, original_size, xor_key
+                )
+                
+                # Подсчет блоков из π и бэкапа
                 for block in compression_blocks:
                     if block.found_positions():
                         pi_blocks += 1
                     else:
                         backup_blocks += 1
                 
-                decompressed_data = self.compression_core.decompress_data(
-                    compression_blocks, pi_digits, original_size, xor_key
-                )
+                # Прогресс бар восстановления файла
+                file_size = len(decompressed_data)
+                chunk_size = 1024  # 1KB chunks
+                written = 0
                 
                 with open(file_path, "wb") as f:
-                    f.write(decompressed_data)
+                    for i in range(0, file_size, chunk_size):
+                        chunk = decompressed_data[i:i+chunk_size]
+                        f.write(chunk)
+                        written += len(chunk)
+                        
+                        # Обновляем прогресс бар
+                        progress = (written / file_size) * 100 if file_size > 0 else 100
+                        bar_length = 30
+                        filled_length = int(bar_length * progress / 100)
+                        bar = '█' * filled_length + '-' * (bar_length - filled_length)
+                        
+                        sys.stdout.write(f"\rВосстановление файла: |{bar}| {progress:.1f}% ({written}/{file_size} байт)")
+                        sys.stdout.flush()
                 
-                # Вывод статистики восстановления
-                print(f"\n  Восстановлено: {pi_blocks} блоков из π, {backup_blocks} блоков из бэкапа")
+                print()  # Новая строка после завершения прогресс бара
+                print(f"  Восстановлено: {pi_blocks} блоков из π, {backup_blocks} блоков из бэкапа")
                 extracted_files.append(str(file_path))
                 processed_files += 1
-                
-                # Финальное обновление прогресс-бара
-                update_extraction_progress()
+                print()  # Перенос строки после завершения файла как в архивации
                 print()  # Перенос строки после завершения файла
                 
             except Exception as e:
                 print(f"\nОшибка извлечения {filename}: {e}")
                 continue
         
-        print(f"\nИзвлечение завершено. Файлов: {len(extracted_files)}")
+        print(f"Извлечение завершено. Файлов: {len(extracted_files)}")
+        print()  # Новая строка после прогресс-бара
         return extracted_files
     
     def _save_compressed_blocks(self, blocks: List, archive_name: str):
@@ -755,7 +611,7 @@ class PiArchiverUltra:
 
 def main():
     """Точка входа для командной строки"""
-    parser = argparse.ArgumentParser(description='Pi-Archiver - Архиватор на основе числа π')
+    parser = argparse.ArgumentParser(description='Pi-Archiver Ultra - Архиватор на основе числа π')
     subparsers = parser.add_subparsers(dest='command', help='Доступные команды')
     
     # Команда архивации
@@ -764,9 +620,8 @@ def main():
     archive_parser.add_argument('-o', '--output', help='Имя архива')
     archive_parser.add_argument('-d', '--directory', help='Директория для сохранения архива')
     archive_parser.add_argument('--gpu', action='store_true', help='Использовать GPU')    
-    archive_parser.add_argument('--workers', type=int, default=4, help='Количество потоков')
-    archive_parser.add_argument('--precision', type=int, default=10000, help='Точность генерации π')
-    archive_parser.add_argument('--force-regenerate', action='store_true', help='Принудительно пересчитать π')
+    archive_parser.add_argument("--workers", type=int, help="Количество потоков")
+    archive_parser.add_argument("--no-backup", action="store_true", help="Отключить сохранение бэкапа блоков")
         # Команда извлечения
     extract_parser = subparsers.add_parser('extract', help='Извлечь архив')
     extract_parser.add_argument('archive', help='Имя архива')
@@ -791,7 +646,7 @@ def main():
     try:
         if args.command == 'archive':
             if len(args.files) == 1:
-                archiver.archive_file(args.files[0], args.output, args.directory, args.gpu, args.workers, getattr(args, "no_backup", False), force_regenerate=getattr(args, "force_regenerate", False))
+                archiver.archive_file(args.files[0], args.output, args.directory, args.gpu, args.workers, getattr(args, "no_backup", False))
 
             else:
                 output_name = args.output or f"archive_{int(time.time())}.piarc"
@@ -859,7 +714,7 @@ def archive_file_optimized(self, input_path: str, output_name: str = None,
         file_data = f.read()
     
     # Параллельное сжатие
-    blocks, stats = self.compression_core.compress_data(
+    blocks, stats = self.compression_core.compress_data_parallel(
         file_data, pi_digits, 
         use_processes=use_processes,
         progress_callback=self._create_progress_callback()
@@ -889,7 +744,7 @@ def extract_file_optimized(self, archive_path: str, output_path: str = None,
     )
     
     # Параллельное восстановление
-    decompressed_data = self.compression_core.decompress_data(
+    decompressed_data = self.compression_core.decompress_data_parallel(
         archive_data['blocks'], pi_digits, 
         archive_data['original_size'],
         use_processes=use_processes
@@ -918,46 +773,26 @@ def get_performance_stats(self) -> dict:
 
 def _create_progress_callback(self):
     """Создает callback для отслеживания прогресса"""
-    start_time = time.time()
-    last_update = 0
-    
-    def callback(progress, current, total):
-        nonlocal last_update
-        current_time = time.time()
-        
-        # Ограничиваем частоту обновления до 10 раз в секунду
-        if current_time - last_update < 0.1 and progress < 100:
-            return
-            
-        last_update = current_time
-        
-        # Расчет оставшегося времени
-        elapsed = current_time - start_time
-        if progress > 0:
-            total_time = elapsed * 100 / progress
-            remaining = total_time - elapsed
-        else:
-            remaining = 0
-            
-        # Форматирование строки прогресса
+    def callback(progress, current, total, remaining_time=None):
         bar_length = 50
         filled_length = int(bar_length * progress / 100)
-        bar = '█' * filled_length + '░' * (bar_length - filled_length)
+        bar = '█' * filled_length + '-' * (bar_length - filled_length)
         
-        # Форматирование оставшегося времени
-        if remaining > 3600:
-            time_str = f"{remaining/3600:.1f}ч"
-        elif remaining > 60:
-            time_str = f"{remaining/60:.1f}м"
+        if remaining_time is not None:
+            if remaining_time > 3600:
+                time_str = f"{remaining_time/3600:.1f} ч"
+            elif remaining_time > 60:
+                time_str = f"{remaining_time/60:.1f} мин"
+            else:
+                time_str = f"{remaining_time:.0f} сек"
+            sys.stdout.write(f"\rСжатие: |{bar}| {progress:.1f}% ({current}/{total}) Осталось: {time_str}")
+            sys.stdout.flush()
         else:
-            time_str = f"{remaining:.0f}с"
-            
-        # Вывод прогресса
-        sys.stdout.write(f"\rГенерация π: |{bar}| {progress:>6.2f}% ({current:>{len(str(total))}}/{total}) ~{time_str:>5} ")
-        sys.stdout.flush()
+            sys.stdout.write(f"\rСжатие: |{bar}| {progress:.1f}% ({current}/{total})")
+            sys.stdout.flush()
         
         if progress >= 100:
-            print(f"\nГотово за {elapsed:.1f} сек")
+            print()
     
     return callback
 

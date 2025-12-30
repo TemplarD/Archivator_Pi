@@ -23,6 +23,8 @@ def create_file_info_from_compression(
         "compression_ratio": stats.compression_ratio,
         "xor_key": xor_key,
         "pi_precision": pi_precision,
+        "blocks_found": stats.blocks_found,
+        "blocks_total": stats.blocks_total,
         "blocks": [
             {
                 "block_id": block.block_id,

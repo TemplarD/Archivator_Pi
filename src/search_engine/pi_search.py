@@ -7,9 +7,10 @@
 import hashlib
 import time
 from typing import List, Tuple, Optional, Dict
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 from dataclasses import dataclass
+import numpy as np
 
 @dataclass
 class SearchResult:
@@ -284,3 +285,150 @@ if __name__ == "__main__":
         print(f"Позиция: {result.start_pos}-{result.end_pos}")
     print(f"Время поиска: {result.search_time:.4f} сек")
     print(f"Хеш данных: {result.data_hash}")
+
+# Векторный кеш для ускорения поиска
+class VectorCache:
+    def __init__(self, max_size: int = 1000000):
+        self.max_size = max_size
+        self.cache = {}
+        self.pi_digits_array = None
+        self.hit_count = 0
+        self.miss_count = 0
+        
+    def load_pi_digits(self, pi_digits: str):
+        """Загружает цифры π в numpy массив для быстрого поиска"""
+        self.pi_digits_array = np.array(list(pi_digits), dtype=np.uint8)
+        
+    def cache_positions(self, pattern: bytes, positions: List[int]):
+        """Кеширует позиции для паттерна"""
+        if len(self.cache) >= self.max_size:
+            # Удаляем самый старый элемент
+            oldest_key = next(iter(self.cache))
+            del self.cache[oldest_key]
+            
+        pattern_hash = hashlib.sha256(pattern).hexdigest()[:16]
+        self.cache[pattern_hash] = positions
+        
+    def get_positions(self, pattern: bytes) -> Optional[List[int]]:
+        """Получает позиции из кеша"""
+        pattern_hash = hashlib.sha256(pattern).hexdigest()[:16]
+        if pattern_hash in self.cache:
+            self.hit_count += 1
+            return self.cache[pattern_hash]
+        else:
+            self.miss_count += 1
+            return None
+            
+    def get_stats(self) -> Dict[str, float]:
+        """Возвращает статистику кеша"""
+        total_requests = self.hit_count + self.miss_count
+        hit_rate = self.hit_count / total_requests if total_requests > 0 else 0.0
+        
+        return {
+            'hit_count': self.hit_count,
+            'miss_count': self.miss_count,
+            'hit_rate': hit_rate,
+            'cache_size': len(self.cache),
+            'max_size': self.max_size
+        }
+
+# Оптимизированный поисковый движок
+class OptimizedPiSearchEngine(PiSearchEngine):
+    def __init__(self, pi_generator, cache_size=1000000):
+        super().__init__(pi_generator)
+        self.vector_cache = VectorCache(cache_size)
+        
+    def load_pi_to_cache(self, pi_digits: str):
+        """Загружает π цифры в векторный кеш"""
+        self.vector_cache.load_pi_digits(pi_digits)
+        
+    def search_sequence_cached(self, data: bytes, pi_digits: str) -> SearchResult:
+        """Поиск с использованием векторного кеша"""
+        start_time = time.time()
+        
+        # Проверяем кеш
+        cached_positions = self.vector_cache.get_positions(data)
+        if cached_positions is not None:
+            search_time = time.time() - start_time
+            return SearchResult(
+                found=True,
+                start_pos=cached_positions[0],
+                data_hash=hashlib.sha256(data).hexdigest()[:8],
+                search_time=search_time
+            )
+        
+        # Если нет в кеше, выполняем поиск
+        result = self.search_sequence(data, pi_digits)
+        
+        # Кешируем результат если найдено
+        if result.found and result.start_pos is not None:
+            self.vector_cache.cache_positions(data, [result.start_pos])
+            
+        return result
+        
+    def get_cache_stats(self) -> Dict[str, float]:
+        """Возвращает статистику кеша"""
+        return self.vector_cache.get_stats()
+        
+    def save_cache(self):
+        """Сохраняет кеш на диск"""
+        import pickle
+        cache_file = self.pi_generator.cache_dir / "search_cache.pkl"
+        with open(cache_file, 'wb') as f:
+            pickle.dump(self.vector_cache.cache, f)
+            
+    def load_cache(self):
+        """Загружает кеш с диска"""
+        import pickle
+        cache_file = self.pi_generator.cache_dir / "search_cache.pkl"
+        if cache_file.exists():
+            with open(cache_file, 'rb') as f:
+                self.vector_cache.cache = pickle.load(f)
+
+# Параллельный поиск с batch обработкой
+def search_blocks_parallel_optimized(self, blocks: List[bytes], pi_digits: str,
+                                    num_workers: int = None, 
+                                    use_processes: bool = True,
+                                    batch_size: int = 100) -> List[SearchResult]:
+    """Оптимизированный параллельный поиск с batch обработкой"""
+    if num_workers is None:
+        num_workers = mp.cpu_count()
+        
+    executor_class = ProcessPoolExecutor if use_processes else ThreadPoolExecutor
+    
+    with executor_class(max_workers=num_workers) as executor:
+        # Разделяем блоки на батчи
+        batches = [blocks[i:i + batch_size] for i in range(0, len(blocks), batch_size)]
+        
+        # Отправляем батчи на обработку
+        future_to_batch = {
+            executor.submit(self._search_batch, pi_digits, batch): batch
+            for batch in batches
+        }
+        
+        # Собираем результаты
+        all_results = []
+        for future in as_completed(future_to_batch):
+            batch = future_to_batch[future]
+            try:
+                batch_results = future.result()
+                all_results.extend(batch_results)
+            except Exception as e:
+                print(f"Ошибка при обработке батча: {e}")
+                # Создаем пустые результаты для этого батча
+                for block in batch:
+                    all_results.append(SearchResult(found=False, data_hash=hashlib.sha256(block).hexdigest()[:8]))
+        
+        return all_results
+
+def _search_batch(self, pi_digits: str, blocks: List[bytes]) -> List[SearchResult]:
+    """Последовательный поиск в батче"""
+    results = []
+    for block in blocks:
+        result = self.search_sequence(block, pi_digits)
+        results.append(result)
+    return results
+
+# Добавляем методы в класс PiSearchEngine
+PiSearchEngine.search_blocks_parallel_optimized = search_blocks_parallel_optimized
+PiSearchEngine._search_batch = _search_batch
