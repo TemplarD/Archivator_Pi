@@ -65,6 +65,15 @@ class ChudnovskyBinarySplitting(BaseParallelGenerator):
             end = start + chunk_size if i < num_workers - 1 else n
             tasks.append((i, start, end, precision))
         
+        print(f"Разделение на {num_workers} потоков по ~{chunk_size:,} итераций")
+        
+        # Создаем РАБОЧИЙ прогресс-бар
+        try:
+            from utils.working_progress import create_working_progress_bar
+            progress_bar = create_working_progress_bar("Многопоточно", 20)
+        except ImportError:
+            progress_bar = None
+        
         # Запускаем многопоточные вычисления
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             future_to_task = {
@@ -81,8 +90,13 @@ class ChudnovskyBinarySplitting(BaseParallelGenerator):
                     results.append(result)
                     completed += 1
                     
+                    # Обновляем РАБОЧИЙ прогресс-бар
+                    progress = (completed / num_workers) * 100
+                    if progress_bar:
+                        progress_bar(progress, completed, num_workers)
+                    
+                    # Вызываем основной callback
                     if progress_callback:
-                        progress = (completed / num_workers) * 100
                         progress_callback(progress, completed, num_workers)
                         
                 except Exception as e:
