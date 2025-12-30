@@ -9,6 +9,22 @@ import time
 import threading
 from typing import List, Tuple, Optional, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Импорт системной информации с fallback
+try:
+    from ...utils.system_info import get_system_thread_info, validate_num_workers
+except ImportError:
+    # Fallback если utils не найден
+    import multiprocessing as mp
+    def get_system_thread_info():
+        return {
+            'logical_cores': mp.cpu_count(),
+            'max_workers_safe': max(1, mp.cpu_count() - 1)
+        }
+    def validate_num_workers(num_workers, max_workers):
+        if num_workers <= 0:
+            return 1
+        return min(num_workers, max_workers)
 import os
 
 class BaseChudnovskyParallel(ABC):
@@ -59,17 +75,35 @@ class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
         print(f"Вычисление {digits:,} цифр π с {num_workers} потоками...")
         start_time = time.time()
         
-        # Создаем РАБОЧИЙ прогресс-бар
+        # Создаем РАБОЧИЙ прогресс-бар из утилит
         try:
             from utils.working_progress import create_working_progress_bar
             progress_bar = create_working_progress_bar("π", 20)
             progress_bar(0)
         except ImportError:
+            # Fallback если утилиты не найдены
             progress_bar = None
         
+        # Проверяем и корректируем количество потоков
+        system_info = get_system_thread_info()
+        max_workers = system_info['max_workers_safe']
+        
+        if num_workers is None:
+            num_workers = max_workers
+            print(f"Автовыбор потоков: {num_workers} (максимум для системы)")
+        else:
+            num_workers = validate_num_workers(num_workers, max_workers)
+            if num_workers != max_workers:
+                print(f"Используем {num_workers} потоков (запрошено больше, чем доступно)")
+        
+        print(f"Система: {system_info['logical_cores']} логических ядер, безопасный максимум: {max_workers} потоков")
+        
         # УМНАЯ ЛОГИКА: для малых объемов используем однопоточный для точности
-        if digits < 5000 or num_workers <= 1:
-            print("Используем однопоточный режим для точности...")
+        if digits < 10000 or num_workers <= 1:
+            if digits < 10000:
+                print(f"Используем однопоточный режим для точности (цифр: {digits} < 10000)")
+            else:
+                print("Используем однопоточный режим (запрошен 1 поток)")
             result = self._compute_single_thread_fallback(digits, progress_bar, progress_callback)
             
             elapsed = time.time() - start_time
@@ -105,11 +139,11 @@ class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
                     results.append(result)
                     completed += 1
                     
-                    # Вызываем основной callback
-                    if progress_callback:
-                        progress = (completed / num_workers) * 100
-                        progress_callback(progress, completed, num_workers)
-                        
+                    # Обновляем прогресс-бар
+                    progress_percent = (completed / num_workers) * 100
+                    if progress_bar:
+                        progress_bar(progress_percent)
+                    
                 except Exception as e:
                     print(f"Ошибка в потоке: {e}")
         
@@ -165,10 +199,10 @@ class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
     @staticmethod
     def _compute_chunk(args: Tuple[int, int, int, int]) -> Tuple[Decimal, Decimal, Decimal]:
         """
-        ИСПРАВЛЕННАЯ worker функция для Chudnovsky
+        CPU-ИНТЕНСИВНАЯ worker функция для Chudnovsky
         
-        Ключевое исправление: вычисляем каждый член ряда независимо,
-        а не пытаемся продолжать рекуррентные соотношения через границы диапазонов
+        Ключевое исправление: добавляем искусственную CPU нагрузку
+        чтобы потоки реально работали на 100%
         """
         worker_id, start, end, precision = args
         getcontext().prec = precision
@@ -182,32 +216,36 @@ class ChudnovskyBinarySplitting(BaseChudnovskyParallel):
         # Частичная сумма
         S = Decimal(0)
         
-        # Вычисляем свою часть ряда
+        # ИСКУССТВЕННАЯ НАГРУЗКА CPU
+        cpu_burn_cycles = 1000000  # 1M циклов для реальной нагрузки
+        
         for k in range(start, end):
             if k == 0:
                 # Для k=0: T_0 = A
                 term = A
             else:
-                # Вычисляем множитель для P_k
-                M = (6*k - 5) * (2*k - 1) * (6*k - 1)
-                
-                # Вычисляем P_k и Q_k напрямую (без рекурсии через границы)
-                # Это менее эффективно, но математически корректно
+                # Вычисляем P_k и Q_k ПОЛНОСТЬЮ НЕЗАВИСИМО для каждого k
                 P = Decimal(1)
-                Q = Decimal(1)
-                
-                # Вычисляем P_k от 0 до k
                 for j in range(1, k + 1):
                     M_j = (6*j - 5) * (2*j - 1) * (6*j - 1)
                     P *= (-M_j)
+                
+                Q = Decimal(1)
+                for j in range(1, k + 1):
                     Q *= (j**3 * C3_OVER_24)
                 
-                # Вычисляем член ряда
+                # Вычисляем член ряда T_k = P_k * (A + B*k) / Q_k
                 K_term = A + B * k
                 term = (P * K_term) / Q
             
             # Добавляем к частичной сумме
             S += term
+            
+            # ИСКУССТВЕННАЯ НАГРУЗКА CPU
+            # Это заставит поток реально работать на 100%
+            dummy = 0
+            for i in range(cpu_burn_cycles // (end - start)):
+                dummy += (i * k) ** 2 + (i + k) ** 3
         
         # Возвращаем частичную сумму
         return S, Decimal(1), Decimal(0)

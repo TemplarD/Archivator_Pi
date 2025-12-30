@@ -24,6 +24,17 @@ index_manager_path = Path(__file__).parent.parent / "index_manager"
 if index_manager_path.exists():
     sys.path.append(str(index_manager_path))
 
+# Импортируем утилиты для системной информации
+try:
+    from utils.system_info import get_system_thread_info, validate_num_workers
+except ImportError:
+    # Fallback если не найден
+    def get_system_thread_info():
+        import multiprocessing as mp
+        return {'logical_cores': mp.cpu_count(), 'max_workers_safe': mp.cpu_count()}
+    def validate_num_workers(num, max_w):
+        return min(max(1, num), max_w)
+
 # Динамический импорт index_manager с обработкой ошибок
 try:
     from index_manager.index_manager import IndexManager
@@ -347,7 +358,16 @@ class PiArchiverUltra:
         # Передаем callback для реального прогресса
         # Определяем количество потоков для генерации π
         if num_workers is None:
-            num_workers = min(mp.cpu_count(), 8)  # Ограничиваем до 8 потоков
+            system_info = get_system_thread_info()
+            num_workers = system_info['max_workers_safe']
+            print(f"Автовыбор потоков: {num_workers} (система: {system_info['logical_cores']} ядер)")
+        else:
+            system_info = get_system_thread_info()
+            max_workers = system_info['max_workers_safe']
+            num_workers = validate_num_workers(num_workers, max_workers)
+            if num_workers != max_workers:
+                print(f"Используем {num_workers} потоков (запрошено больше, чем доступно: {max_workers})")
+        
         print(f"Используем {num_workers} потоков для генерации π\n")
         
         pi_digits = self.pi_generator.generate_pi_digits(
