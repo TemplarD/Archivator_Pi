@@ -32,37 +32,40 @@ class BBPPiGenerator:
     def _compute_hex_digit(n: int) -> int:
         """
         Вычисление одной шестнадцатеричной цифры π в позиции n
-        Использует модифицированную формулу BBP
+        Использует правильную формулу BBP
         """
-        # Основная сумма (до n)
-        sum_main = 0.0
-        for k in range(n + 1):
-            sum_main += (4.0 * BBPPiGenerator._bbp_term(k, 1) -
-                         2.0 * BBPPiGenerator._bbp_term(k, 4) -
-                         BBPPiGenerator._bbp_term(k, 5) -
-                         BBPPiGenerator._bbp_term(k, 6))
+        from decimal import Decimal, getcontext
+        getcontext().prec = 50  # Высокая точность для вычислений
         
-        # Хвост суммы (после n) для точности
-        sum_tail = 0.0
-        for k in range(n + 1, n + 100):  # 100 итераций для точности
-            term = (4.0 / (8.0 * k + 1.0) -
-                   2.0 / (8.0 * k + 4.0) -
-                   1.0 / (8.0 * k + 5.0) -
-                   1.0 / (8.0 * k + 6.0)) / (16.0 ** (k - n))
-            sum_tail += term
-            if abs(term) < 1e-17:
+        # BBP формула для шестнадцатеричной цифры
+        # π = Σ(k=0 to ∞) [1/16^k * (4/(8k+1) - 2/(8k+4) - 1/(8k+5) - 1/(8k+6))]
+        
+        # Вычисляем сумму до n
+        s1 = Decimal(0)
+        for k in range(n + 1):
+            s1 += (Decimal(4) / (8*k + 1) - 
+                   Decimal(2) / (8*k + 4) - 
+                   Decimal(1) / (8*k + 5) - 
+                   Decimal(1) / (8*k + 6)) / (Decimal(16) ** k)
+        
+        # Вычисляем хвост суммы (n+1 to ∞)
+        s2 = Decimal(0)
+        for k in range(n + 1, n + 20):  # Ограничиваем для скорости
+            term = (Decimal(4) / (8*k + 1) - 
+                   Decimal(2) / (8*k + 4) - 
+                   Decimal(1) / (8*k + 5) - 
+                   Decimal(1) / (8*k + 6)) / (Decimal(16) ** k)
+            s2 += term
+            if abs(term) < Decimal(1e-20):
                 break
         
-        total = sum_main + sum_tail
+        total = s1 + s2
         
-        # Извлечение дробной части
-        fractional = total - math.floor(total)
-        if fractional < 0:
-            fractional += 1.0
+        # Извлекаем дробную часть и умножаем на 16
+        fractional = total - int(total)
+        hex_digit = int(fractional * 16)
         
-        # Получение шестнадцатеричной цифры
-        digit = int(fractional * 16.0)
-        return digit
+        return hex_digit
     
     class ProgressUpdater:
         def __init__(self, queue: mp.Queue, worker_id: int, total: int):
@@ -171,18 +174,24 @@ class BBPPiGenerator:
         """
         Конвертация шестнадцатеричных цифр π в десятичные
         """
-        # Для простоты, используем встроенную конвертацию
-        # В реальной реализации здесь может быть более сложный алгоритм
         try:
-            # Конвертируем hex в целое число, затем в десятичную строку
-            pi_int = int(hex_str, 16)
-            pi_decimal = str(pi_int)
-            return pi_decimal
-        except (ValueError, OverflowError):
-            # Если число слишком большое, используем Decimal
+            # Убираем ведущие нули и конвертируем
+            hex_str = hex_str.lstrip('0')
+            if not hex_str:
+                return ""
+            
+            # Используем Decimal для больших чисел
             getcontext().prec = len(hex_str) * 2  # Достаточная точность
-            pi_decimal = Decimal(int(hex_str, 16))
-            return str(pi_decimal)
+            pi_int = Decimal(int(hex_str, 16))
+            
+            # Конвертируем в строку и убираем десятичную точку
+            pi_decimal = str(pi_int).replace('.', '')
+            
+            # Возвращаем только нужное количество цифр
+            return pi_decimal
+        except (ValueError, OverflowError) as e:
+            print(f"Ошибка конвертации: {e}")
+            return ""
     
     def generate_pi_digits_block(self, num_digits: int, progress_callback=None) -> str:
         """

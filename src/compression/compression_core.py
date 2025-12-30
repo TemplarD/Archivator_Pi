@@ -10,6 +10,8 @@ import math
 from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass
 import numpy as np
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 @dataclass
 class CompressionBlock:
@@ -88,9 +90,120 @@ class CompressionCore:
         
         return encoded_blocks, stats
     
+    def compress_data_parallel(self, data: bytes, pi_digits: str,
+                              block_size_range: Tuple[int, int] = (4, 16), 
+                              num_workers: int = None, progress_callback=None) -> Tuple[List[CompressionBlock], CompressionStats]:
+        """
+        Многопоточное сжатие данных
+        
+        Args:
+            data: исходные данные для сжатия
+            pi_digits: строка с цифрами π
+            block_size_range: диапазон размеров блоков в байтах
+            num_workers: количество потоков
+            progress_callback: функция для отслеживания прогресса
+            
+        Returns:
+            список сжатых блоков и статистика
+        """
+        if num_workers is None:
+            num_workers = min(mp.cpu_count(), 8)
+        
+        print(f"Начало многопоточного сжатия {len(data)} байт с {num_workers} потоками...")
+        
+        # 1. XOR-декорреляция (однопоточно, т.к. зависит от порядка)
+        xor_data, xor_key = self._xor_decorrelate(data, pi_digits)
+        
+        # 2. Адаптивное разбиение на блоки (однопоточно)
+        blocks = self._adaptive_block_splitting(xor_data, block_size_range)
+        
+        # 3. Многопоточный поиск блоков в π
+        found_blocks = self._parallel_block_search(blocks, pi_digits, num_workers, progress_callback)
+        
+        # 4. Арифметическое кодирование позиций (однопоточно)
+        encoded_blocks = self._arithmetic_encode_positions(found_blocks)
+        
+        # 5. Расчет статистики
+        stats = self._calculate_compression_stats(data, encoded_blocks)
+        
+        return encoded_blocks, stats
+    
+    def _parallel_block_search(self, blocks: List[bytes], pi_digits: str, 
+                               num_workers: int, progress_callback=None) -> List[CompressionBlock]:
+        """
+        Многопоточный поиск блоков в π
+        """
+        import time
+        start_time = time.time()
+        
+        # Разделяем блоки между потоками
+        block_size = len(blocks) // num_workers
+        tasks = []
+        
+        for i in range(num_workers):
+            start_idx = i * block_size
+            end_idx = start_idx + block_size if i < num_workers - 1 else len(blocks)
+            worker_blocks = blocks[start_idx:end_idx]
+            tasks.append((i, worker_blocks, pi_digits, start_idx))
+        
+        # Запускаем многопоточную обработку
+        results = []
+        completed_blocks = 0
+        total_blocks = len(blocks)
+        
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            future_to_task = {
+                executor.submit(self._compress_block_batch, task): task 
+                for task in tasks
+            }
+            
+            for future in as_completed(future_to_task):
+                try:
+                    worker_blocks = future.result()
+                    results.extend(worker_blocks)
+                    completed_blocks += len(worker_blocks)
+                    
+                    # Обновляем прогресс
+                    if progress_callback:
+                        progress = (completed_blocks / total_blocks) * 100
+                        elapsed_time = time.time() - start_time
+                        if completed_blocks < total_blocks:
+                            estimated_total = elapsed_time * total_blocks / completed_blocks
+                            remaining_time = estimated_total - elapsed_time
+                            progress_callback(progress, completed_blocks, total_blocks, remaining_time)
+                        else:
+                            progress_callback(100, completed_blocks, total_blocks, 0)
+                            
+                except Exception as e:
+                    print(f"Ошибка в потоке: {e}")
+        
+        # Сортируем по block_id
+        results.sort(key=lambda x: x.block_id)
+        return results
+    
+    @staticmethod
+    def _compress_block_batch(args: Tuple[int, List[bytes], str, int]) -> List[CompressionBlock]:
+        """
+        Обработка пакета блоков в отдельном процессе
+        """
+        worker_id, blocks, pi_digits, start_idx = args
+        
+        from .compression_core import CompressionCore
+        
+        # Создаем временный экземпляр для обработки
+        temp_core = CompressionCore(None)
+        results = []
+        
+        for i, block in enumerate(blocks):
+            block_id = start_idx + i
+            block_info = temp_core._compress_block(block, pi_digits, block_id)
+            results.append(block_info)
+        
+        return results
+    
     def _xor_decorrelate(self, data: bytes, pi_digits: str) -> Tuple[bytes, int]:
         """
-        XOR-декорреляция данных с последовательностью π
+        XOR-декорреляция данных с последовательностью π (векторизованная)
         
         Args:
             data: исходные данные
@@ -105,18 +218,48 @@ class CompressionCore:
         else:
             xor_key = 0x3F
         
-        # Применяем XOR к данным
-        xor_data = bytearray()
-        pi_bytes = bytes.fromhex(pi_digits[:len(data) * 2])
-        
-        for i, byte in enumerate(data):
-            if i < len(pi_bytes):
-                xor_byte = byte ^ pi_bytes[i] ^ xor_key
+        # Векторизованная XOR-декорреляция с NumPy
+        try:
+            # Конвертируем в NumPy массивы для векторизации
+            data_array = np.frombuffer(data, dtype=np.uint8)
+            
+            # Подготавливаем π байты
+            pi_hex = pi_digits[:len(data) * 2]
+            if len(pi_hex) % 2 != 0:
+                pi_hex += '0'  # Дополняем до четной длины
+            pi_bytes = bytes.fromhex(pi_hex)
+            pi_array = np.frombuffer(pi_bytes, dtype=np.uint8)
+            
+            # Выравниваем массивы
+            min_len = min(len(data_array), len(pi_array))
+            data_trim = data_array[:min_len]
+            pi_trim = pi_array[:min_len]
+            
+            # Векторизованный XOR
+            xor_trim = data_trim ^ pi_trim ^ xor_key
+            
+            # Обрабатываем остаток данных
+            if len(data_array) > min_len:
+                remainder = data_array[min_len:] ^ xor_key
+                xor_result = np.concatenate([xor_trim, remainder])
             else:
-                xor_byte = byte ^ xor_key
-            xor_data.append(xor_byte)
-        
-        return bytes(xor_data), xor_key
+                xor_result = xor_trim
+            
+            return bytes(xor_result), xor_key
+            
+        except Exception:
+            # Fallback к обычному методу если NumPy недоступен или ошибка
+            xor_data = bytearray()
+            pi_bytes = bytes.fromhex(pi_digits[:len(data) * 2])
+            
+            for i, byte in enumerate(data):
+                if i < len(pi_bytes):
+                    xor_byte = byte ^ pi_bytes[i] ^ xor_key
+                else:
+                    xor_byte = byte ^ xor_key
+                xor_data.append(xor_byte)
+            
+            return bytes(xor_data), xor_key
     
     def _adaptive_block_splitting(self, data: bytes, size_range: Tuple[int, int]) -> List[bytes]:
         """

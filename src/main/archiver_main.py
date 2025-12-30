@@ -410,8 +410,8 @@ class PiArchiverUltra:
         
         if use_parallel:
             print(f"Используем параллельное сжатие ({num_workers} потоков)...\n")
-            blocks, stats = self.compression_core.compress_data(
-                file_data, pi_digits, progress_callback=compression_progress_callback
+            blocks, stats = self.compression_core.compress_data_parallel(
+                file_data, pi_digits, num_workers=num_workers, progress_callback=compression_progress_callback
             )
         else:
             blocks, stats = self.compression_core.compress_data(

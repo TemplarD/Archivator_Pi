@@ -21,38 +21,29 @@ except ImportError:
     BBPPiGenerator = None
 
 def _generate_partial(args):
-    """Исправленная функция генерации части последовательности с блочным подходом"""
+    """Простая многопоточность: каждый процесс генерирует полный π для своего диапазона"""
     worker_id, total_digits, num_workers = args
     
     from decimal import Decimal, getcontext
     import os
     
-    # Очень высокая точность для корректности больших объемов
+    # Высокая точность
     precision = total_digits + 500
     getcontext().prec = precision
     
-    # print(f'Процесс {os.getpid()} (worker {worker_id}): точность {precision}')  # Отключаем для чистого вывода
-    
-    # Блочный подход - каждый процесс вычисляет свой диапазон итераций
+    # Вычисляем полный π используя тот же алгоритм что и однопоточный
     C = Decimal(426880) * Decimal(10005).sqrt()
     max_iterations = total_digits // 14 + 1
     
-    # Распределяем итерации между процессами
-    iterations_per_worker = max_iterations // num_workers
-    start_iter = worker_id * iterations_per_worker
-    end_iter = start_iter + iterations_per_worker if worker_id < num_workers - 1 else max_iterations
-    
-    # Инициализация для каждого процесса
+    # Инициализация как в однопоточном коде
     M = Decimal(1)
     L = Decimal(13591409)
     X = Decimal(1)
     K = 6
-    S = Decimal(0)
+    S = Decimal(L) / Decimal(X)
     
-    # Вычисляем свой диапазон итераций
-    for i in range(start_iter, end_iter):
-        if i == 0:
-            continue
+    # Вычисляем все итерации
+    for i in range(1, max_iterations):
         M = M * (K**3 - 16*K) // (i**3)
         L += Decimal(545140134)
         X *= Decimal(-262537412640768000)
@@ -61,8 +52,12 @@ def _generate_partial(args):
         S += term
         K += 12
     
-    # print(f'Процесс {os.getpid()} (worker {worker_id}): итерации {start_iter}-{end_iter}')  # Отключаем
-    return S
+    # Вычисляем π
+    pi = C / S
+    pi_str = str(pi)[2:]  # Убираем "3."
+    
+    # Возвращаем полную строку (основной процесс разберется с блоками)
+    return worker_id, pi_str
 
 def _validate_chunk(args):
     """Глобальная функция валидации чанка"""
@@ -176,16 +171,10 @@ class PiGenerator:
         if num_workers is None:
             num_workers = mp.cpu_count()
         
-        # Используем BBP алгоритм для корректной многопоточности
-        if BBPPiGenerator and num_workers > 1 and digits >= 1000:
-            print(f"Используем BBP многопоточность ({num_workers} потоков) для {digits:,} цифр...")
-            bbp_gen = BBPPiGenerator(num_workers=num_workers)
-            return bbp_gen.generate_pi_digits_bbp(digits, progress_callback)
-        elif num_workers > 1 and digits >= 5000:
-            print(f"Используем {num_workers} потоков для генерации {digits:,} цифр...")
-            return self._chudnovsky_parallel(digits, progress_callback, num_workers)
-        else:
-            return self._chudnovsky_python(digits, progress_callback)
+        # Chudnovsky алгоритм последовательный по своей природе
+        # Многопоточность неэффективна и создает ошибки точности
+        # TODO: Реализовать многопоточность в сжатии данных вместо генерации π
+        return self._chudnovsky_python(digits, progress_callback)
     
     def _generate_with_gpu(self, digits: int, progress_callback=None) -> str:
         """Генерация π с использованием GPU (OpenCL)"""
@@ -211,7 +200,7 @@ class PiGenerator:
         print(f"Основной процесс PID: {os.getpid()}")
         
         # Устанавливаем высокую точность для больших объемов
-        precision = digits + 500  # Увеличенная точность для корректности
+        precision = digits + 1000  # Увеличенная точность для корректности
         getcontext().prec = precision
         
         # Предвычисляем константы с повышенной точностью
@@ -223,14 +212,8 @@ class PiGenerator:
             tasks = [(i, digits, num_workers) for i in range(num_workers)]
             results = pool.map(_generate_partial, tasks)
         
-        # Суммируем результаты
-        total_S = sum(results)
-        
-        # Финальное вычисление π
-        pi = C / total_S
-        
-        # Преобразование в строку
-        pi_str = str(pi)[2:]
+        # Все процессы генерируют одинаковые результаты, берем первый
+        worker_id, pi_str = results[0]
         return pi_str[:digits]
     
     def _chudnovsky_python(self, digits: int, progress_callback=None) -> str:
