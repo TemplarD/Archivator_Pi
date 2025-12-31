@@ -98,11 +98,21 @@ if(BUILD_TESTS)
 endif()
 
 # Python биндинги
-option(BUILD_PYTHON_BINDINGS "Build Python bindings" OFF)
+option(BUILD_PYTHON_BINDINGS "Build Python bindings" ON)
 if(BUILD_PYTHON_BINDINGS)
     find_package(pybind11 REQUIRED)
+    
+    # Добавляем -fPIC для Python биндингов
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET pi_archiver_core PROPERTY POSITION_INDEPENDENT_CODE ON)
+    
     pybind11_add_module(pi_core bindings/python_bindings.cpp)
     target_link_libraries(pi_core PRIVATE pi_archiver_core)
+    
+    # Установка Python модуля
+    install(TARGETS pi_core
+        DESTINATION lib/python3/site-packages
+    )
 endif()
 
 # Информация о сборке
