@@ -75,6 +75,26 @@ if(BUILD_TESTS)
     # Финальный unified тест
     add_executable(test_final tests/test_final.cpp)
     target_link_libraries(test_final pi_archiver_core gmp mpfr)
+    
+    # Тест для 1 миллиона цифр
+    add_executable(test_1M tests/test_1M.cpp)
+    target_link_libraries(test_1M pi_archiver_core gmp mpfr)
+    
+    # Тест универсальной оптимизации
+    add_executable(test_universal tests/test_universal.cpp)
+    target_link_libraries(test_universal pi_archiver_core gmp mpfr)
+    
+    # Тест для средних наборов (30K-200K)
+    add_executable(test_medium tests/test_medium.cpp)
+    target_link_libraries(test_medium pi_archiver_core gmp mpfr)
+    
+    # Тест умного выбора потоков
+    add_executable(test_smart_threads tests/test_smart_threads.cpp)
+    target_link_libraries(test_smart_threads pi_archiver_core gmp mpfr)
+    
+    # Тест адаптивной системы потоков
+    add_executable(test_adaptive tests/test_adaptive.cpp)
+    target_link_libraries(test_adaptive pi_archiver_core gmp mpfr)
 endif()
 
 # Python биндинги
